@@ -416,8 +416,6 @@
   .desc-edit[hidden]{display:none}
   .desc-edit.desc-cancel{background:var(--danger-soft);border-color:var(--danger-line);
                          color:var(--danger)}
-  #focus-tag{flex:0 0 auto;white-space:nowrap}
-  #focus-tag[hidden]{display:none}
 
   /* ---------- buttons ---------- */
   button{font:inherit;font-size:13.2px;font-weight:600;cursor:pointer;border-radius:var(--r-ctl);
@@ -598,7 +596,6 @@
             <label class="f" for="focus">Focus project (boards below follow this)</label>
             <div class="focus-row">
               <select id="focus" onchange="onFocusChange()" title="Every project board below shows this project."></select>
-              <span class="tag ok" id="focus-tag" title="Whether this focus project is also Hermes' active project."></span>
             </div>
           </div>
           <button class="primary" onclick="openCreateModal()" title="herman -p <name> · opens the create form in a dialog.">Create new project</button>
@@ -2102,19 +2099,12 @@ function markFocusField(){
      and it turns clearly teal with an `active project` tag while the focus project IS Hermes'
      sticky default. When it is not, a warn tag names the project Hermes would really use. */
   const sel = document.getElementById('focus');
-  const tagEl = document.getElementById('focus-tag');
   if (!sel) return;
   const cur = sel.value || '';
   const isActive = Boolean(cur) && cur === activeProjectName;
   sel.classList.toggle('is-active', isActive);
-  if (tagEl){
-    /* No text beside the field while the focus project IS the active one (the tint says it): the
-       tag only appears to name the project Hermes would really use when the two differ. */
-    const warn = !isActive && Boolean(activeProjectName);
-    tagEl.textContent = warn ? 'sticky: ' + activeProjectName : '';
-    tagEl.className = 'tag ' + (isActive ? 'ok' : 'warn');
-    tagEl.hidden = !warn;
-  }
+  /* No label beside the field: the tint says the focus project is the active one, and the tooltip
+     names the active project when the two differ (the user asked for no visible text there). */
   sel.title = "Every project board below shows this project; the field is tinted while it is also"
     + " Hermes' active project." + (isActive ? ''
     : " Hermes' active project is " + (activeProjectName || 'unknown') + '.');
