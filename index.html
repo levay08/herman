@@ -2190,15 +2190,25 @@ function pruneUiState(){
   } catch (e) { /* private mode or blocked storage: nothing to prune */ }
 }
 async function syncNow(){
-  /* The header Refresh button: sync with the engine (and clean what sync can clear), then reload the
-     page hard. The reload is the point: a tab that was open before an update keeps running the old
-     JavaScript, and no amount of re-fetching fixes a stale page. */
-  setStatus('running', 'Syncing and reloading…');
-  try { await run('sync', ''); } catch (e) { /* the reload below still has to happen */ }
+  /* The header Refresh button: sync first, then reload the page hard. The output dock stays closed
+     while this runs (the operator asked for a cleaner panel, not a log viewer), so the result arrives
+     as one line in the status chip. Only a failure opens the console, because then there is something
+     to read. */
+  setStatus('running', 'Syncing…');
+  const res = await run('sync', '', null, {quiet: true}) || {ok: false, lines: []};
+  if (!res.ok){
+    clearOut();
+    (res.lines.length ? res.lines : ['the sync request failed']).forEach(l => say(l));
+    setStatus('error', 'Sync failed: nothing was reloaded, the console shows why.');
+    return;
+  }
+  const line = res.lines.find(l => /verdict/.test(l)) || '';
+  const verdict = line.replace(/^\s*verdict\s*/, '').trim();
   pruneUiState();
   const u = new URL(location.href);
   u.searchParams.set('v', String(Date.now()));      // a fresh URL defeats any cached copy
-  location.replace(u.toString());                    // replace(): no extra history entry
+  setStatus('done', verdict ? 'Synced: ' + verdict : 'Synced · reloading');
+  setTimeout(() => location.replace(u.toString()), verdict ? 900 : 150);
 }
 const MUTATING_ACTIONS = new Set([
   /* mirrors the panel's POST-only list: a state change must never ride on a GET, so a prefetch,
@@ -2209,12 +2219,17 @@ const MUTATING_ACTIONS = new Set([
   'git-set-helper', 'access-set-env', 'access-unset-env', 'access-new-key', 'access-revoke-key',
   'access-add-agent', 'access-revoke-agent', 'access-gitcred-add', 'access-gitcred-rm',
 ]);
-async function run(action, name, extra){
+async function run(action, name, extra, opts){
   /* State-changing actions are POSTed, read-only ones are fetched with GET; both answer the same
-     SSE frames, parsed by hand here so the token can also travel in a header instead of the URL. */
+     SSE frames, parsed by hand here so the token can also travel in a header instead of the URL.
+     `opts.quiet` keeps the output dock out of it (it stays exactly as the operator left it) and
+     returns {ok, lines} instead, which is what the Refresh button needs. */
+  const quiet = !!(opts && opts.quiet);
+  const collected = [];
+  let okSoFar = true;
   if (src) { src.close(); src = null; }
   lastAction = action;
-  resetOut('$ herman ' + action + (name ? ' ' + name : ''));
+  if (!quiet) resetOut('$ herman ' + action + (name ? ' ' + name : ''));
   startTimer(LABELS[action] || 'Working…');
   const q = new URLSearchParams(Object.assign({t: TOKEN, action, name}, extra || {}));
   const method = MUTATING_ACTIONS.has(action) ? 'POST' : 'GET';
@@ -2224,9 +2239,10 @@ async function run(action, name, extra){
     if (!res.ok || !res.body){
       const err = await res.json().catch(() => ({error: res.status + ' ' + res.statusText}));
       clearInterval(timer);
-      say('✗ ' + (err.error || 'request failed'));
+      okSoFar = false;
+      if (!quiet) say('✗ ' + (err.error || 'request failed'));
       setStatus('error', err.error || 'request failed');
-      return;
+      return {ok: false, lines: [err.error || 'request failed']};
     }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -2242,16 +2258,21 @@ async function run(action, name, extra){
           if (!line.startsWith('data: ')) continue;
           try {
             const d = JSON.parse(line.slice(6));
-            if (d.line !== undefined && !d.line.startsWith('$ herman') && d.line.trim()) say(d.line);
+            if (d.line === undefined || d.line.startsWith('$ herman') || !d.line.trim()) continue;
+            if (quiet) collected.push(d.line); else say(d.line);
           } catch (e) { /* keepalive */ }
         }
       }
     }
+    if (quiet){ clearInterval(timer); return {ok: okSoFar, lines: collected}; }
     finishStream();
+    return {ok: okSoFar, lines: collected};
   } catch (e) {
     clearInterval(timer);
+    if (quiet){ setStatus('error', 'Request failed: ' + e); return {ok: false, lines: [String(e)]}; }
     say('✗ ' + e);
     setStatus('error', 'Stream stopped unexpectedly.');
+    return {ok: false, lines: [String(e)]};
   }
 }
 async function runPost(action, name, body){
