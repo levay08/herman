@@ -1751,33 +1751,41 @@ async function loadInsights(){
 }
 let msgContext = null;
 function killProjectSessions(name, count){
-  const nm = typeToConfirm('Stop ' + count + ' running session(s) of ' + name + '?'
-    + '\nThe stop is polite: interrupt (same as Ctrl+C), then terminate, then kill only if needed.'
-    + '\nThe transcript up to the last saved turn stays on disk.', name);
+  const nm = typeToConfirm('Stop ' + count + ' running session(s) of ' + name + '?', name,
+    {note: 'The stop is polite: interrupt (same as Ctrl+C), then terminate, then kill only if needed.'
+         + '\nThe session transcript stays on disk: nothing is deleted.'});
   if (!nm) return;
   run('kill', nm);
   setTimeout(() => { if (typeof refreshAll === 'function') refreshAll(); }, 3000);
 }
 function killOneSession(name, sessionId){
-  const nm = typeToConfirm('Stop session ' + sessionId + ' of ' + name + '?'
-    + '\nThe stop is polite: interrupt (same as Ctrl+C), then terminate, then kill only if needed.', name);
+  const nm = typeToConfirm('Stop session ' + sessionId + ' of ' + name + '?', name,
+    {note: 'The stop is polite: interrupt (same as Ctrl+C), then terminate, then kill only if needed.'
+         + '\nThe session transcript stays on disk: nothing is deleted.'});
   if (!nm) return;
   closeProj();
   run('kill-session', nm, {session: sessionId});
   setTimeout(() => { if (typeof refreshAll === 'function') refreshAll(); }, 3000);
 }
-function typeToConfirm(what, target){
+function typeToConfirm(what, target, opts){
   /* Destructive actions follow the house rule: the project name is typed, never just "OK".
      `target` defaults to the focus project, but a card can act on another project, so callers
-     that know their target pass it explicitly (otherwise typing the right name fails). */
+     that know their target pass it explicitly. The comparison ignores case (Hermes project names
+     are lower case anyway, so "Demo" for "demo" is a typo, not a different project) and a refusal
+     is written to the console as well, so a cancelled attempt is never invisible. */
+  const o = opts || {};
   const sel = document.getElementById('focus');
   const nm = target || focusProject || (sel ? sel.value : '');
-  const ans = prompt(what + '\n\nProject: ' + nm
-    + '\nA full database backup is written to history-backups/ before anything is removed.'
-    + '\nType the project name to confirm:');
-  if (ans === null) { setStatus('warn', 'Cancelled.'); return null; }
-  if (ans.trim() !== nm){
+  const ans = prompt(what + (o.note ? '\n' + o.note : '')
+    + '\n\nProject: ' + nm + '\nType the project name to confirm:');
+  if (ans === null){
+    setStatus('warn', 'Cancelled.');
+    say('✗ cancelled: nothing was changed.');
+    return null;
+  }
+  if (ans.trim().toLowerCase() !== String(nm).trim().toLowerCase()){
     setStatus('error', 'Name did not match: nothing changed.');
+    say('✗ name did not match "' + nm + '": nothing was changed.');
     return null;
   }
   return nm;
@@ -1786,7 +1794,8 @@ function deleteThisMessage(){
   const m = msgContext && msgContext.msg;
   if (!m) return;
   const nm = typeToConfirm('Delete message #' + m.id + ' (' + m.role
-    + (m.tool_name ? ' · ' + m.tool_name : '') + ')?', msgContext.project);
+    + (m.tool_name ? ' · ' + m.tool_name : '') + ')?', msgContext.project,
+    {note: 'A full database backup is written to history-backups/ before anything is removed.'});
   if (!nm) return;
   closeMsg();
   run('history-delete-message', nm, {id: m.id});
@@ -1795,7 +1804,8 @@ function deleteThisMessage(){
 function deleteThisSession(){
   const s = msgContext && msgContext.session;
   if (!s || !s.id) return;
-  const nm = typeToConfirm('Delete the whole session "' + (s.title || s.id) + '"?', msgContext.project);
+  const nm = typeToConfirm('Delete the whole session "' + (s.title || s.id) + '"?', msgContext.project,
+    {note: 'A full database backup is written to history-backups/ before anything is removed.'});
   if (!nm) return;
   closeMsg();
   run('history-delete-session', nm, {session: s.id});
