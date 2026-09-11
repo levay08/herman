@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-HERMAN · hermes-agent easy management
-=====================================
+HERMAN · hermes-agent · simple task manager
+===========================================
 One front door for every Hermes project (profile).
 
 HERMAN is a WRAPPER around hermes: every action calls the installed
