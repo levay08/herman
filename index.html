@@ -21,6 +21,10 @@
        scroller the neutral pair. Never a raw colour in the rules below. */
     --scroll-track:#eef3f6; --scroll-thumb:#7fa4ae; --scroll-thumb-hover:#0d9488;
     --scroll-out:#4f9c94; --scroll-out-hover:#0f766e;
+    /* the focus field is the panel's steering wheel: a tinted field, stronger when the focus
+       project IS Hermes' active project. */
+    --field-bg:#f1f7f9; --field-line:#cfe2e6;
+    --focus-bg:#e0f5f0; --focus-line:#0d9488; --focus-halo:rgba(13,148,136,.16);
     --hero-a:#fff; --hero-b:#fbfefe;
     --default-soft:#eef4ff; --default-line:#cfe0fb;
     --card-hover:0 4px 14px rgba(16,40,50,.08); --card-hover-line:#d3dee4;
@@ -50,6 +54,8 @@
     --code-text:#d6e6ec; --topbar-bg:rgba(14,22,27,.9);
     --scroll-track:#1f2b33; --scroll-thumb:#5f7c8c; --scroll-thumb-hover:#2dd4bf;
     --scroll-out:#3aa89b; --scroll-out-hover:#2dd4bf;
+    --field-bg:#16222a; --field-line:#283946;
+    --focus-bg:#12332e; --focus-line:#2dd4bf; --focus-halo:rgba(45,212,191,.22);
     --hero-a:#18232b; --hero-b:#141e25;
     --default-soft:#152134; --default-line:#2b4568;
     --card-hover:0 6px 18px rgba(0,0,0,.45); --card-hover-line:#3d515d;
@@ -227,6 +233,38 @@
   .chart .col i.zero{background:var(--line-strong);opacity:.45}
   .chart-x{display:flex;justify-content:space-between;gap:var(--s2);font-size:10.8px;
            color:var(--dim2);margin-top:4px}
+  /* ---------- rundown chart (Activity): axes, per-bucket values, drag-to-zoom ---------- */
+  .rchartwrap{margin:var(--s2) 0 var(--s3);min-width:0}
+  .rchart{display:flex;gap:8px;align-items:stretch}
+  .rchart .yax{display:flex;flex-direction:column;justify-content:space-between;min-width:46px;
+               font-size:9.7px;color:var(--dim2);text-align:right;font-variant-numeric:tabular-nums;
+               padding-bottom:30px}
+  .rchart .plot{position:relative;flex:1 1 auto;min-width:0;cursor:crosshair}
+  .rchart .bars{display:flex;align-items:flex-end;gap:2px;height:132px;
+                border-bottom:1px solid var(--line2);padding-bottom:2px}
+  .rchart .bars .col{position:relative;flex:1 1 0;min-width:2px;height:100%;display:flex;
+                     align-items:flex-end}
+  .rchart .bars .col i{display:block;width:100%;min-height:2px;border-radius:2px 2px 0 0;
+                       background:var(--teal);opacity:.85}
+  .rchart .bars .col i.zero{background:var(--line-strong);opacity:.45}
+  /* A grid with repeat(<bars>, minmax(0,1fr)) laid out from JS: equal columns that always fit
+     the card, where a flex row kept its min-content width and pushed the page sideways at 420px. */
+  .rchartwrap .xl{display:grid;gap:2px;margin-top:4px;height:28px;overflow:hidden;min-width:0}
+  .rchartwrap .xl span{min-width:0;font-size:9.5px;line-height:1.15;color:var(--dim2);
+                   text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;
+                   overflow:hidden;text-overflow:clip}
+  .rchartwrap .xl span b{display:block;color:var(--text);font-weight:650}
+  .rchartwrap .xl.dense span{font-size:8.4px}
+  .rchartwrap .sel{position:absolute;top:0;bottom:30px;background:var(--focus-halo);
+               border-left:1px solid var(--teal);border-right:1px solid var(--teal);display:none;
+               pointer-events:none}
+  .rchart .plot.picking .sel{display:block}
+  .rax{display:flex;justify-content:space-between;gap:var(--s2);font-size:10.4px;color:var(--dim2);
+       margin-top:2px}
+  .sw{display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--teal);
+      margin-right:5px;vertical-align:-1px}
+  .sw.s2{background:var(--sky)}
+  .zoomtag{display:inline-block;margin-left:6px}
   .ubars{display:flex;flex-direction:column;gap:8px;margin:var(--s2) 0 var(--s3)}
   .ubar{border:1px solid var(--line2);border-radius:var(--r-ctl);padding:8px 10px;background:var(--surface2)}
   .ubar .r1{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
@@ -337,6 +375,14 @@
   select.picker option{padding:3px 6px}
   select.picker optgroup{font-family:inherit;font-weight:700;color:var(--dim2);font-size:11.4px;
                          text-transform:uppercase;letter-spacing:.05em}
+  /* The focus field is tinted so the eye lands on it, and it reads clearly when the focus
+     project IS Hermes' active project (that is the one every board below is showing). */
+  .focus-row{display:flex;align-items:center;gap:7px;min-width:0}
+  .focus-row #focus{flex:1 1 auto;background:var(--field-bg);border-color:var(--field-line);
+                    font-weight:650}
+  .focus-row #focus.is-active{background:var(--focus-bg);border-color:var(--focus-line);
+                              box-shadow:0 0 0 3px var(--focus-halo)}
+  #focus-tag{flex:0 0 auto;white-space:nowrap}
 
   /* ---------- buttons ---------- */
   button{font:inherit;font-size:13.2px;font-weight:600;cursor:pointer;border-radius:var(--r-ctl);
@@ -515,7 +561,10 @@
         <div class="top-actions">
           <div>
             <label class="f" for="focus">Focus project (boards below follow this)</label>
-            <select id="focus" onchange="onFocusChange()" title="Every project board below shows this project."></select>
+            <div class="focus-row">
+              <select id="focus" onchange="onFocusChange()" title="Every project board below shows this project."></select>
+              <span class="tag ok" id="focus-tag" title="Whether this focus project is also Hermes' active project."></span>
+            </div>
           </div>
           <button class="primary" onclick="openCreateModal()" title="herman -p <name> · opens the create form in a dialog.">Create new project</button>
           <button class="ghost" onclick="syncNow()" title="hard refresh: runs herman sync --fix (re-checks the engine, profiles, shortcuts and panel files, clears what is stale), prints the result in the output panel, then reloads this page from a fresh URL so a stale tab cannot keep running old JavaScript.">Refresh</button>
@@ -658,9 +707,16 @@
           <button class="subtab" data-sub="activity" onclick="vtab('insights','activity')">Activity</button>
           <button class="subtab" data-sub="tools" onclick="vtab('insights','tools')">Tools</button>
           <button class="subtab" data-sub="context" onclick="vtab('insights','context')">Context health</button>
+          <button class="subtab" data-sub="cache" onclick="vtab('insights','cache')">Cache</button>
           <button class="subtab" data-sub="errors" onclick="vtab('insights','errors')">Errors</button>
         </div>
         <p class="note">Everything below is read read-only from the focus project's <code>state.db</code> and <code>logs/</code>: nothing is written, so it is safe to use while Hermes sessions are running.</p>
+
+        <div class="card pad" id="ins-usage-card">
+          <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Token usage of the focus project</div>
+          <dl class="kv" id="ins-usage-kv"></dl>
+          <p class="hint" id="ins-usage-note"></p>
+        </div>
 
         <div class="subpane on" data-sub="search">
           <div class="card pad">
@@ -678,11 +734,38 @@
 
         <div class="subpane" data-sub="activity">
           <div class="card pad">
-            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Messages per day (30 days)</div>
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Rundown</div>
+            <div class="row">
+              <div>
+                <label class="f" for="act-gran">Group by</label>
+                <select id="act-gran" onchange="actRundown()" title="Per year charts the months of that year, per month charts the dates in it, per week the seven days, per day the 24 hours.">
+                  <option value="year">Per year (bars = months)</option>
+                  <option value="month" selected>Per month (bars = dates)</option>
+                  <option value="week">Per week (bars = days)</option>
+                  <option value="day">Per day (bars = hours)</option>
+                </select>
+              </div>
+              <div>
+                <label class="f" for="act-period">Period</label>
+                <select id="act-period" onchange="actRundown()" title="The year, month, week or day this rundown covers."></select>
+              </div>
+              <div>
+                <label class="f" for="act-metric">Measure</label>
+                <select id="act-metric" onchange="actRundown()" title="What the Y axis counts. Per day only message counts exist, because the engine does not record per-message tokens.">
+                  <option value="messages">Messages</option>
+                  <option value="user">Messages from you</option>
+                  <option value="assistant">Assistant replies</option>
+                  <option value="calls">Tool calls</option>
+                </select>
+              </div>
+              <button class="ghost" id="act-reset" onclick="actZoomReset()" title="Undo the zoom and chart the whole period again (a double-click on the chart does the same).">Reset zoom</button>
+            </div>
             <div id="act-chart" class="chartwrap"></div>
-            <div class="subhead">Messages per hour</div>
+            <p class="hint" id="act-hint">Drag across the chart to zoom into a range, double-click to reset.</p>
+            <div class="scrollx"><table id="act-rundown-table"></table></div>
+            <div class="subhead">Messages per hour (all time)</div>
             <div id="act-hours" class="chartwrap"></div>
-            <div class="subhead">Daily breakdown</div>
+            <div class="subhead">Daily breakdown (last 30 days)</div>
             <div class="scrollx"><table id="act-table"></table></div>
           </div>
         </div>
@@ -700,6 +783,19 @@
             <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Recent sessions: context and compression</div>
             <div class="scrollx"><table id="ctx-table"></table></div>
             <p class="hint" id="ctx-note"></p>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="cache">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Prompt cache: hit rate, fresh input and what it saved</div>
+            <div class="utiles" id="cache-tiles"></div>
+            <p class="hint" id="cache-note"></p>
+            <div class="subhead">Cache read per day (fresh input for each day is in the table below)</div>
+            <div id="cache-chart" class="chartwrap"></div>
+            <div class="scrollx"><table id="cache-day-table"></table></div>
+            <div class="subhead">Per model</div>
+            <div class="scrollx"><table id="cache-model-table"></table></div>
           </div>
         </div>
 
@@ -1182,6 +1278,7 @@ function navigate(route){
 }
 function onFocusChange(){
   loadFocus();                        // model, git and access follow the focus project
+  markFocusField();                   // loadFocus() already stored the new focus synchronously
   loadUsage();                        // usage + insights are per project too
   loadInsights();
   activateProject(document.getElementById('focus').value);
@@ -1198,6 +1295,8 @@ async function activateProject(name){
       return;
     }
     say('✓ active project set to ' + d.active + '   (hermes profile use ' + d.active + ')');
+    activeProjectName = d.active || name;
+    markFocusField();
     setStatus('ok', 'Active project: ' + d.active);
     await refresh();                  // tiles, cards and the "(active)" marker follow
   }catch(e){
@@ -1305,6 +1404,8 @@ function renderProjects(d){
   });
   sel.value = d.projects.some(p => p.name === keep) ? keep : (d.projects[0] || {}).name || '';
   focusProject = sel.value;
+  activeProjectName = d.active || '';
+  markFocusField();
 
   tiles(d);
   grid(d.projects);
@@ -1737,7 +1838,9 @@ async function loadUsage(){
   const nm = focusProject || (sel ? sel.value : '');
   if (!nm || !document.getElementById('model-usage-tiles')) return;
   try {
-    renderModelUsage(await (await fetch(`/api/usage?t=${TOKEN}&name=${encodeURIComponent(nm)}`)).json());
+    const u = await (await fetch(`/api/usage?t=${TOKEN}&name=${encodeURIComponent(nm)}`)).json();
+    renderModelUsage(u);
+    renderInsUsage(u);            // the Insights board shows the same project's token usage
   } catch (e) { setHint('usage-project', 'could not load usage'); }
 }
 async function loadUsageAll(){
@@ -1746,10 +1849,403 @@ async function loadUsageAll(){
     renderUsageAll(await (await fetch(`/api/usage-all?t=${TOKEN}`)).json());
   } catch (e) { setHint('usage-note', 'could not load usage'); }
 }
+/* ---------- focus field: which project the boards below are on, and is it the active one ------- */
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DAYNAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+let activeProjectName = '';
+function markFocusField(){
+  /* The focus select is the panel's steering wheel: its field is tinted so the eye lands on it,
+     and it turns clearly teal with an `active project` tag while the focus project IS Hermes'
+     sticky default. When it is not, a warn tag names the project Hermes would really use. */
+  const sel = document.getElementById('focus');
+  const tagEl = document.getElementById('focus-tag');
+  if (!sel) return;
+  const cur = sel.value || '';
+  const isActive = Boolean(cur) && cur === activeProjectName;
+  sel.classList.toggle('is-active', isActive);
+  if (tagEl){
+    tagEl.textContent = isActive ? 'active project'
+      : (activeProjectName ? 'sticky: ' + activeProjectName : 'no active project');
+    tagEl.className = 'tag ' + (isActive ? 'ok' : 'warn');
+  }
+  sel.title = "Every project board below shows this project; the field is tinted while it is also"
+    + " Hermes' active project." + (isActive ? ''
+    : " Hermes' active project is " + (activeProjectName || 'unknown') + '.');
+}
+function fmtShort(n){
+  n = Number(n) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e4) return Math.round(n / 1e3) + 'k';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+
+/* ---------- bar chart with real axes, per-bar values and drag-to-crop -------------------------- */
+function rchart(target, buckets, series, opts){
+  /* Y ticks on the left, every drawn bar labelled with its own value under the X axis, axis
+     captions, and (when opts.zoom is given) a drag selection that reports the first and last
+     bucket index the user dragged over so the caller can crop the range. */
+  opts = opts || {};
+  const el = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!el) return null;
+  el.textContent = '';
+  const data = buckets || [];
+  const ser = (series && series.length) ? series : [{key: 'messages', name: 'Messages', cls: ''}];
+  if (!data.length){ el.appendChild(hintNode('Nothing to chart in this period yet.')); return null; }
+  let max = 0;
+  data.forEach(b => ser.forEach(s => {
+    const v = Number(((b.values || {})[s.key]) || 0);
+    if (v > max) max = v;
+  }));
+  const top = max || 1;
+  const wrap = document.createElement('div'); wrap.className = 'rchartwrap';
+  if (opts.legend && ser.length > 1){
+    const lg = document.createElement('div'); lg.className = 'rax';
+    const left = document.createElement('span');
+    ser.forEach((s, i) => {
+      const sw = document.createElement('span'); sw.className = 'sw' + (s.cls ? ' ' + s.cls : '');
+      const tx = document.createElement('span'); tx.textContent = s.name;
+      if (i) left.appendChild(document.createTextNode('   '));
+      left.append(sw, tx);
+    });
+    lg.appendChild(left); wrap.appendChild(lg);
+  }
+  const chart = document.createElement('div'); chart.className = 'rchart';
+  const yax = document.createElement('div'); yax.className = 'yax';
+  [top, Math.round(top / 2), 0].forEach(v => {
+    const s = document.createElement('span'); s.textContent = fmtShort(v); yax.appendChild(s);
+  });
+  const plot = document.createElement('div'); plot.className = 'plot';
+  const bars = document.createElement('div'); bars.className = 'bars';
+  data.forEach(b => {
+    const col = document.createElement('div'); col.className = 'col';
+    col.title = b.tip || b.key || b.label || '';
+    ser.forEach(s => {
+      const v = Number(((b.values || {})[s.key]) || 0);
+      const bar = document.createElement('i');
+      if (s.cls) bar.className = s.cls;
+      if (!v){ bar.className = (bar.className ? bar.className + ' ' : '') + 'zero'; bar.style.height = '2px'; }
+      else bar.style.height = Math.max(3, Math.round(100 * v / top)) + '%';
+      col.appendChild(bar);
+    });
+    bars.appendChild(col);
+  });
+  const sel = document.createElement('div'); sel.className = 'sel';
+  plot.append(bars, sel);
+  const step = data.length > 16 ? Math.ceil(data.length / 16) : 1;
+  const xl = document.createElement('div'); xl.className = 'xl' + (data.length > 14 ? ' dense' : '');
+  xl.style.gridTemplateColumns = 'repeat(' + data.length + ', minmax(0, 1fr))';
+  data.forEach((b, idx) => {
+    const sp = document.createElement('span');
+    if (idx % step === 0){
+      sp.appendChild(document.createTextNode(b.label === undefined || b.label === null ? '' : String(b.label)));
+      const val = document.createElement('b');
+      val.textContent = fmtShort((b.values || {})[ser[0].key]);
+      sp.appendChild(val);
+    }
+    xl.appendChild(sp);
+  });
+  chart.append(yax, plot);
+  wrap.append(chart, xl);
+  const ax = document.createElement('div'); ax.className = 'rax';
+  const l = document.createElement('span'); l.textContent = 'X: ' + (opts.axisX || 'bucket');
+  const r = document.createElement('span'); r.textContent = 'Y: ' + (opts.axisY || 'value');
+  ax.append(l, r); wrap.appendChild(ax);
+  el.appendChild(wrap);
+  if (opts.zoom){
+    let from = null;
+    const idxAt = x => {
+      const r = bars.getBoundingClientRect();
+      const rel = Math.min(Math.max((x - r.left) / Math.max(1, r.width), 0), 0.999);
+      return Math.floor(rel * data.length);
+    };
+    const draw = (a, b) => {
+      const r = bars.getBoundingClientRect();
+      const cw = r.width / data.length;
+      sel.style.left = Math.round(Math.min(a, b) * cw) + 'px';
+      sel.style.width = Math.max(2, Math.round(Math.abs(b - a) * cw)) + 'px';
+    };
+    plot.addEventListener('pointerdown', e => {
+      from = idxAt(e.clientX);
+      plot.classList.add('picking'); draw(from, from + 1);
+      if (plot.setPointerCapture && e.pointerId !== undefined) plot.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    plot.addEventListener('pointermove', e => { if (from !== null) draw(from, idxAt(e.clientX) + 1); });
+    plot.addEventListener('pointerup', e => {
+      if (from === null) return;
+      const to = idxAt(e.clientX);
+      const a = Math.min(from, to), b = Math.max(from, to);
+      from = null; plot.classList.remove('picking');
+      if (opts.zoom && b > a) opts.zoom(a, b);      // a single click is not a crop
+    });
+    plot.addEventListener('pointercancel', () => { from = null; plot.classList.remove('picking'); });
+    plot.addEventListener('dblclick', () => { if (opts.reset) opts.reset(); });
+  }
+  return {plot: plot, bars: bars, sel: sel};
+}
+
+/* ---------- token usage of the focus project (Insights header) -------------------------------- */
+function renderInsUsage(u){
+  if (!document.getElementById('ins-usage-kv')) return;
+  if (!u || u.error){
+    kv('ins-usage-kv', [['status', 'usage unavailable for this project']]);
+    setHint('ins-usage-note', '');
+    return;
+  }
+  const t = u.totals || {};
+  kv('ins-usage-kv', [
+    ['project', u.project || '-'],
+    ['active model', u.active_model || '-'],
+    ['total tokens', fmtTok(t.total) + '  (' + fmtTok(t.input) + ' in + ' + fmtTok(t.output) + ' out)'],
+    ['fresh input', fmtTok(t.input)],
+    ['output', fmtTok(t.output)],
+    ['reasoning', fmtTok(t.reasoning)],
+    ['api calls', (t.calls || 0).toLocaleString('en-US') + '  (' + (t.sessions || 0) + ' sessions)'],
+    ['estimated cost', fmtUsd(t.est_usd)]
+  ]);
+  setHint('ins-usage-note', 'Read read-only from ' + (u.project || 'this project') + "'s state.db; money is an estimate"
+    + ' from third-party price tables. "total tokens" counts fresh input + output, so cache reads are not in it:'
+    + ' the Cache tab shows them (with the hit rate and what they saved), and the per-model split is in the Model board.');
+}
+
+/* ---------- prompt cache analytics (Insights -> Cache) ---------------------------------------- */
+function cacheTilesFrom(c){
+  const t = c.totals || {};
+  return [
+    {k: 'Cache hit rate', v: (t.hit_pct || 0) + '%',
+     d: fmtTok(t.cache_read) + ' of ' + fmtTok(t.prompt) + ' prompt tokens'},
+    {k: 'Fresh input', v: fmtTok(t.fresh), d: 'charged at the full input price'},
+    {k: 'Cache read', v: fmtTok(t.cache_read), d: 'served from the provider cache'},
+    {k: 'Cache write', v: fmtTok(t.cache_write),
+     d: c.write_usd === null ? 'no cache-write price in the table' : 'est ' + fmtUsd(c.write_usd)},
+    {k: 'Saved by the cache', v: fmtUsd(c.saved_usd),
+     d: 'as fresh input those tokens would cost ' + fmtUsd(c.fresh_usd)},
+    {k: 'Cache read cost', v: fmtUsd(c.paid_usd), d: 'what the cache reads actually add'},
+    {k: 'Calls', v: (t.calls || 0).toLocaleString('en-US'), d: (t.sessions || 0) + ' sessions'}
+  ];
+}
+function renderCache(c){
+  const note = document.getElementById('cache-note');
+  if (!c){
+    if (note) note.textContent = 'no cache data for this project yet';
+    return;
+  }
+  uTiles('cache-tiles', cacheTilesFrom(c));
+  if (note){
+    const bits = ['Hit rate = cache read / (cache read + fresh input): a cached prompt token is served'
+      + ' by the provider cache, so it never appears in the fresh input count.',
+      'Money is an estimate from third-party price tables (' + (c.priced_models || 0) + ' priced model(s)'
+      + ((c.unpriced_models || []).length ? ', no price for ' + c.unpriced_models.join(', ') : '') + ').',
+      "Per-day rows follow each session's last activity date, exactly like the usage board."];
+    if (c.write_usd === null) bits.push('This model carries no cache-write price, so cache creation is reported in tokens only.');
+    note.textContent = bits.join(' ');
+  }
+  const days = (c.days || []).map(d => ({
+    label: d.day.slice(5), key: d.day, values: {cache_read: d.cache_read},
+    tip: d.day + ' · cache read ' + fmtTok(d.cache_read) + ' · fresh input ' + fmtTok(d.fresh)
+         + ' · hit ' + (d.hit_pct || 0) + '%'
+  }));
+  rchart('cache-chart', days, [{key: 'cache_read', name: 'cache read', cls: ''}],
+    {axisX: 'day', axisY: 'cache read tokens per day'});
+  table('cache-day-table', ['Day', 'Fresh input', 'Cache read', 'Cache write', 'Hit rate', 'Calls'],
+    (c.days || []).slice().reverse().map(d => [d.day, fmtTok(d.fresh), fmtTok(d.cache_read),
+      fmtTok(d.cache_write), (d.hit_pct || 0) + '%', d.calls]),
+    'No usage recorded yet.');
+  table('cache-model-table',
+    ['Model', 'Calls', 'Sessions', 'Fresh input', 'Cache read', 'Cache write', 'Hit rate', 'Saved'],
+    (c.models || []).map(m => [m.model, m.calls, m.sessions, fmtTok(m.fresh), fmtTok(m.cache_read),
+      fmtTok(m.cache_write), (m.hit_pct || 0) + '%', m.priced ? fmtUsd(m.saved_usd) : 'n/a']),
+    'No model usage recorded yet.');
+}
+
+/* ---------- Activity rundown: per year / month / week / day, croppable ------------------------- */
+const ACT_METRICS = {messages: 'Messages', user: 'Messages from you', assistant: 'Assistant replies',
+                     calls: 'Tool calls'};
+let actData = {daily: [], hourly: []};
+let actZoom = null;                       /* [first, last] bucket index inside the current period */
+function ymdUTC(s){
+  const p = String(s || '').split('-').map(Number);
+  return new Date(Date.UTC(p[0] || 1970, (p[1] || 1) - 1, p[2] || 1));
+}
+function ymd(d){ return d.toISOString().slice(0, 10); }
+function addDays(d, n){ const x = new Date(d.getTime()); x.setUTCDate(x.getUTCDate() + n); return x; }
+function isoWeek(day){
+  const d = ymdUTC(day);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3);
+  const firstThu = ymdUTC(d.getUTCFullYear() + '-01-04');
+  firstThu.setUTCDate(firstThu.getUTCDate() - ((firstThu.getUTCDay() + 6) % 7) + 3);
+  const week = 1 + Math.round((d.getTime() - firstThu.getTime()) / (7 * 86400000));
+  return {year: d.getUTCFullYear(), week: week, key: d.getUTCFullYear() + '-W' + String(week).padStart(2, '0')};
+}
+function isoWeekMonday(day){
+  const d = ymdUTC(day);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d;
+}
+function monthDays(ym){
+  const p = String(ym || '').split('-').map(Number);
+  return new Date(Date.UTC(p[0] || 1970, p[1] || 1, 0)).getUTCDate();
+}
+function actGran(){ const el = document.getElementById('act-gran'); return el ? el.value : 'month'; }
+function actMetric(){ const el = document.getElementById('act-metric'); return el ? el.value : 'messages'; }
+function actPeriods(){
+  const gran = actGran();
+  const days = actData.daily.map(d => d.day);
+  if (gran === 'year') return [...new Set(days.map(d => d.slice(0, 4)))].sort();
+  if (gran === 'month') return [...new Set(days.map(d => d.slice(0, 7)))].sort();
+  if (gran === 'week') return [...new Set(days.map(d => isoWeek(d).key))].sort();
+  return [...new Set(days)].sort();
+}
+function actPeriodLabel(p){
+  const gran = actGran();
+  if (!p) return 'no activity recorded';
+  if (gran === 'month'){ const s = String(p).split('-'); return MONTHS[Number(s[1]) - 1] + ' ' + s[0]; }
+  if (gran === 'week'){ const s = String(p).split('-W'); return 'week ' + s[1] + ' of ' + s[0]; }
+  if (gran === 'day') return String(p);
+  return String(p);
+}
+function actPeriodOptions(){
+  const sel = document.getElementById('act-period');
+  if (!sel) return;
+  const list = actPeriods();
+  const prev = sel.value;
+  sel.textContent = '';
+  list.forEach(p => {
+    const o = document.createElement('option'); o.value = p; o.textContent = actPeriodLabel(p);
+    sel.appendChild(o);
+  });
+  sel.value = list.includes(prev) ? prev : (list[list.length - 1] || '');
+}
+function actBucket(label, key, days, byDay){
+  const v = {messages: 0, user: 0, assistant: 0, calls: 0};
+  days.forEach(k => {
+    const d = byDay[k];
+    if (!d) return;
+    v.messages += d.messages || 0; v.user += d.user || 0;
+    v.assistant += d.assistant || 0; v.calls += d.calls || 0;
+  });
+  return {label: label, key: key, values: v,
+    tip: key + ' · ' + v.messages + ' messages (' + v.user + ' from you, ' + v.assistant
+         + ' assistant) · ' + v.calls + ' tool calls'};
+}
+function actBuild(){
+  const gran = actGran();
+  const sel = document.getElementById('act-period');
+  const period = sel ? sel.value : '';
+  const byDay = {};
+  actData.daily.forEach(d => { byDay[d.day] = d; });
+  const buckets = [];
+  if (!period) return {gran: gran, period: period, buckets: buckets};
+  if (gran === 'year'){
+    for (let m = 1; m <= 12; m++){
+      const mm = String(m).padStart(2, '0');
+      const keys = Object.keys(byDay).filter(k => k.startsWith(period + '-' + mm));
+      buckets.push(actBucket(MONTHS[m - 1], period + '-' + MONTHS[m - 1], keys, byDay));
+    }
+  } else if (gran === 'month'){
+    for (let d = 1; d <= monthDays(period); d++){
+      const day = period + '-' + String(d).padStart(2, '0');
+      buckets.push(actBucket(String(d).padStart(2, '0'), day, [day], byDay));
+    }
+  } else if (gran === 'week'){
+    const anchor = actData.daily.find(d => isoWeek(d.day).key === period);
+    const monday = anchor ? isoWeekMonday(anchor.day) : null;
+    for (let i = 0; i < 7; i++){
+      const day = monday ? ymd(addDays(monday, i)) : '';
+      buckets.push(actBucket(day ? DAYNAMES[i] + ' ' + day.slice(8) : '-', day || period + ' +' + i,
+        day ? [day] : [], byDay));
+    }
+  } else {
+    const byHour = {};
+    actData.hourly.filter(h => h.day === period).forEach(h => {
+      byHour[h.hour] = (byHour[h.hour] || 0) + (h.messages || 0);
+    });
+    for (let h = 0; h < 24; h++){
+      const n = byHour[h] || 0;
+      buckets.push({label: String(h).padStart(2, '0'), key: period + ' ' + String(h).padStart(2, '0') + ':00',
+        values: {messages: n, user: 0, assistant: 0, calls: 0},
+        tip: String(h).padStart(2, '0') + ':00 · ' + n + ' messages'});
+    }
+  }
+  return {gran: gran, period: period, buckets: buckets};
+}
+function actRundown(){
+  const gran = actGran();
+  const sel = document.getElementById('act-period');
+  if (sel && !actPeriods().includes(sel.value)){
+    actZoom = null;                 // a new granularity means a whole new bucket list
+    actPeriodOptions();             // and the period list has to follow it
+  }
+  const mSel = document.getElementById('act-metric');
+  if (mSel){
+    [...mSel.options].forEach(o => { o.disabled = (gran === 'day' && o.value !== 'messages'); });
+    if (gran === 'day' && mSel.value !== 'messages') mSel.value = 'messages';
+  }
+  const metric = gran === 'day' ? 'messages' : actMetric();
+  const unit = ACT_METRICS[metric] || 'Messages';
+  const built = actBuild();
+  const all = built.buckets;
+  const full = all.length;
+  if (actZoom && (actZoom[1] >= full || actZoom[0] < 0)) actZoom = null;
+  if (actZoom && (actZoom[1] - actZoom[0] + 1) <= 2) actZoom = null;
+  const view = actZoom ? all.slice(actZoom[0], actZoom[1] + 1) : all;
+  const valAt = b => Number((b.values || {})[metric]) || 0;
+  const sum = list => list.reduce((s, b) => s + valAt(b), 0);
+  const total = sum(all), shown = sum(view);
+  const peak = view.reduce((m, b) => Math.max(m, valAt(b)), 0);
+  /* Name the bars by what they really are: a year view draws months, a month view draws dates,
+     a week view draws days and a day view draws hours. */
+  const barUnit = built.gran === 'year' ? 'month' : (built.gran === 'day' ? 'hour' : 'day');
+  const axisX = built.gran === 'year' ? 'month in ' + built.period
+    : (built.gran === 'month' ? 'date in ' + actPeriodLabel(built.period)
+      : (built.gran === 'week' ? 'day in ' + actPeriodLabel(built.period) : 'hour of ' + built.period));
+  rchart('act-chart', view, [{key: metric, name: unit, cls: ''}], {
+    axisX: axisX,
+    axisY: unit.toLowerCase() + ' per ' + barUnit,
+    zoom: (a, b) => actZoomTo(a, b),
+    reset: () => actZoomReset()
+  });
+  const btn = document.getElementById('act-reset');
+  if (btn) btn.disabled = !actZoom;
+  setHint('act-hint', !full
+    ? 'No activity recorded for this project yet, so there is nothing to chart.'
+    : full + ' ' + barUnit + 's in ' + actPeriodLabel(built.period) + ' · '
+      + shown.toLocaleString('en-US') + ' ' + unit.toLowerCase()
+      + ' shown (peak ' + peak.toLocaleString('en-US') + ') · ' + total.toLocaleString('en-US')
+      + ' in the whole period · '
+      + (actZoom ? 'zoomed to ' + view[0].key + ' → ' + view[view.length - 1].key
+          + '; drag again to zoom deeper, or Reset zoom'
+        : 'drag across the chart to zoom into a range, double-click to reset'));
+  table('act-rundown-table', ['Bucket', unit, 'Share of period'],
+    view.map(b => [b.key, valAt(b).toLocaleString('en-US'),
+      total ? ((100 * valAt(b)) / total).toFixed(1) + '%' : '0%']),
+    'No messages in this period.');
+}
+function actZoomTo(a, b){
+  const base = actZoom ? actZoom[0] : 0;
+  const full = actBuild().buckets.length;
+  const from = base + a, to = base + b;
+  if (to - from + 1 >= full || to - from + 1 < 2) return;
+  actZoom = [from, to];
+  actRundown();
+}
+function actZoomReset(){
+  actZoom = null;
+  actRundown();
+}
+function buildRundown(i){
+  actData.daily = i.daily || [];
+  actData.hourly = i.hourly || [];
+  actZoom = null;
+  actPeriodOptions();
+  actRundown();
+}
 function renderInsights(i){
   if (!i || i.error){ setHint('ctx-note', 'insights unavailable' + (i && i.error ? ': ' + i.error : '')); return; }
-  const act = (i.activity || []).slice().reverse().map(a => ({day: a.day, messages: a.messages, calls: a.tool}));
-  uChart('act-chart', act, 'messages', 'messages per day', 'messages');
+  buildRundown(i);                    // per year / month / week / day, with the crop-zoom chart
+  renderCache(i.cache);
   uChart('act-hours', (i.hours || []).map((n, h) => ({day: String(h).padStart(2, '0'), messages: n})), 'messages',
     'messages per hour', 'messages');
   table('act-table', ['Day', 'Messages', 'User', 'Assistant', 'Tool'],
