@@ -45,6 +45,7 @@ ALLOW = [
     r"@example\.(?:com|org)", r"you@", r"user@",
     r'class="[^"]*\bhero\b', r"\.hero\b", r"--hero-", r"hero-",
     r"/home/(?:me|you|user|someone)\b", r"~/Projects",
+    r"/home/herman\b",            # the unprivileged user inside the published container image
 ]
 
 
