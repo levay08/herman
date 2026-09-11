@@ -100,7 +100,7 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
   their output into the console at the bottom
 - **Model** current model, model changer and the token usage board
 - **Insights** history search (click a hit to read the full message), activity, tool counters,
-  context health, error digest, history deletion
+  context health, error digest
 - **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections
 - **Maintenance** backups, disk space, about
 

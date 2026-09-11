@@ -645,7 +645,6 @@
           <button class="subtab" data-sub="tools" onclick="vtab('insights','tools')">Tools</button>
           <button class="subtab" data-sub="context" onclick="vtab('insights','context')">Context health</button>
           <button class="subtab" data-sub="errors" onclick="vtab('insights','errors')">Errors</button>
-          <button class="subtab" data-sub="history" onclick="vtab('insights','history')">Delete history</button>
         </div>
         <p class="note">Everything below is read read-only from the focus project's <code>state.db</code> and <code>logs/</code>: nothing is written, so it is safe to use while Hermes sessions are running.</p>
 
@@ -687,25 +686,6 @@
             <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Recent sessions: context and compression</div>
             <div class="scrollx"><table id="ctx-table"></table></div>
             <p class="hint" id="ctx-note"></p>
-          </div>
-        </div>
-
-        <div class="subpane" id="sub-history" data-sub="history">
-          <div class="card pad">
-            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Delete history</div>
-            <p class="hint" id="hist-note">…</p>
-            <dl class="kv modal-kv" id="hist-kv"></dl>
-            <div class="row" style="margin-top:10px">
-              <div>
-                <label class="f" for="hist-query">Sessions matching a search (same index as above)</label>
-                <input id="hist-query" placeholder="leave empty to disable" autocomplete="off">
-              </div>
-              <button class="danger ghost" onclick="deleteMatching()" title="herman history <project> --delete-matching <query> · deletes every session whose messages match.">Delete matching</button>
-              <button class="danger" onclick="deleteAllHistory()" title="herman history <project> --delete-all · deletes every stored session of this project.">Delete all history</button>
-            </div>
-            <p class="hint" style="margin-top:8px">A session that is running right now is never touched. Each delete
-              writes a full database copy to <code>history-backups/</code> first, then rebuilds the search index and
-              re-runs the integrity check. The delete needs the project name typed to confirm.</p>
           </div>
         </div>
 
@@ -1753,14 +1733,6 @@ function renderInsights(i){
       fmtTok(c.input_tokens), fmtTok(c.output_tokens), fmtTok(c.cache_read_tokens), fmtTok(c.msg_tokens), c.when,
       (c.compression_ineffective_count || 0) + (c.compression_fallback_streak ? ' · streak ' + c.compression_fallback_streak : '')]),
     'No sessions yet.');
-  kv('hist-kv', [
-    ['sessions', (i.sessions || 0)],
-    ['messages', Number(i.messages || 0).toLocaleString('en-US')],
-    ['live now', (i.live || []).length ? (i.live || []).join(', ') : 'none'],
-    ['backups', 'written to history-backups/ before every delete'],
-  ]);
-  setHint('hist-note', (i.sessions || 0) + ' sessions and ' + Number(i.messages || 0).toLocaleString('en-US')
-    + ' messages are stored for this project. Deleting is permanent; the backup is the way back.');
   setHint('ctx-note', (i.sessions || 0) + ' sessions · ' + Number(i.messages || 0).toLocaleString('en-US')
     + ' messages stored in this project (read read-only).');
   const e = i.errors || {};
@@ -1828,18 +1800,6 @@ function deleteThisSession(){
   closeMsg();
   run('history-delete-session', nm, {session: s.id});
   setTimeout(() => { if (typeof doSearch === 'function') doSearch(); }, 2500);
-}
-function deleteMatching(){
-  const q = (document.getElementById('hist-query').value || '').trim();
-  if (!q){ setStatus('error', 'Type a search first, or use Delete all history.'); return; }
-  const nm = typeToConfirm('Delete every session whose messages match "' + q + '"?');
-  if (!nm) return;
-  run('history-delete-matching', nm, {q});
-}
-function deleteAllHistory(){
-  const nm = typeToConfirm('Delete ALL stored history of this project?');
-  if (!nm) return;
-  run('history-delete-all', nm);
 }
 async function openMessage(msgId){
   if (!msgId) return;
