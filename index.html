@@ -383,6 +383,7 @@
   .focus-row #focus.is-active{background:var(--focus-bg);border-color:var(--focus-line);
                               box-shadow:0 0 0 3px var(--focus-halo)}
   #focus-tag{flex:0 0 auto;white-space:nowrap}
+  #focus-tag[hidden]{display:none}
 
   /* ---------- buttons ---------- */
   button{font:inherit;font-size:13.2px;font-weight:600;cursor:pointer;border-radius:var(--r-ctl);
@@ -1864,9 +1865,12 @@ function markFocusField(){
   const isActive = Boolean(cur) && cur === activeProjectName;
   sel.classList.toggle('is-active', isActive);
   if (tagEl){
-    tagEl.textContent = isActive ? 'active project'
-      : (activeProjectName ? 'sticky: ' + activeProjectName : 'no active project');
+    /* No text beside the field while the focus project IS the active one (the tint says it): the
+       tag only appears to name the project Hermes would really use when the two differ. */
+    const warn = !isActive && Boolean(activeProjectName);
+    tagEl.textContent = warn ? 'sticky: ' + activeProjectName : '';
     tagEl.className = 'tag ' + (isActive ? 'ok' : 'warn');
+    tagEl.hidden = !warn;
   }
   sel.title = "Every project board below shows this project; the field is tinted while it is also"
     + " Hermes' active project." + (isActive ? ''
