@@ -648,7 +648,6 @@
         <div class="subtabs">
           <button class="subtab active" data-sub="current" onclick="vtab('model','current')">Current model</button>
           <button class="subtab" data-sub="change" onclick="vtab('model','change')">Change model</button>
-          <button class="subtab" data-sub="usage" onclick="vtab('model','usage')">Token usage</button>
         </div>
         <p class="note">The model lives in the project's Hermes config (<code>model.default</code>, <code>model.provider</code>), so Hermes itself picks it up: new sessions of this project use what you set here.</p>
 
@@ -656,22 +655,10 @@
           <div class="card pad">
             <p class="hint">project <b id="model-project">…</b></p>
             <dl class="kv" id="model-kv"></dl>
+            <p class="hint" id="model-cost">…</p>
             <div class="subhead">Endpoint</div>
             <p class="hint" id="model-known">…</p>
             <p class="hint" id="model-sources">…</p>
-          </div>
-        </div>
-
-        <div class="subpane" data-sub="usage">
-          <div class="card pad">
-            <p class="hint">project <b id="usage-project">…</b> · numbers read read-only from state.db</p>
-            <div class="utiles" id="model-usage-tiles"></div>
-            <div class="subhead">Usage per model</div>
-            <div class="ubars" id="model-usage-models"></div>
-            <div class="subhead">Tokens per day (30 days)</div>
-            <div id="model-usage-chart" class="chartwrap"></div>
-            <div class="subhead">Previously used models</div>
-            <div class="scrollx"><table id="model-usage-history"></table></div>
           </div>
         </div>
 
@@ -704,7 +691,8 @@
 
       <section class="view" id="view-insights">
         <div class="subtabs">
-          <button class="subtab active" data-sub="search" onclick="vtab('insights','search')">History search</button>
+          <button class="subtab active" data-sub="usage" onclick="vtab('insights','usage')">Token usage</button>
+          <button class="subtab" data-sub="search" onclick="vtab('insights','search')">History search</button>
           <button class="subtab" data-sub="activity" onclick="vtab('insights','activity')">Activity</button>
           <button class="subtab" data-sub="tools" onclick="vtab('insights','tools')">Tools</button>
           <button class="subtab" data-sub="context" onclick="vtab('insights','context')">Context health</button>
@@ -713,13 +701,21 @@
         </div>
         <p class="note">Everything below is read read-only from the focus project's <code>state.db</code> and <code>logs/</code>: nothing is written, so it is safe to use while Hermes sessions are running.</p>
 
-        <div class="card pad" id="ins-usage-card">
-          <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Token usage of the focus project</div>
-          <dl class="kv" id="ins-usage-kv"></dl>
-          <p class="hint" id="ins-usage-note"></p>
+        <div class="subpane on" data-sub="usage">
+          <div class="card pad">
+            <p class="hint">project <b id="usage-project">…</b> · numbers read read-only from <code>state.db</code>. "total tokens" counts fresh input + output, so prompt-cache reads are not in it: the Cache tab owns those (hit rate and what they saved).</p>
+            <div class="utiles" id="ins-usage-tiles"></div>
+            <p class="hint" id="ins-usage-note"></p>
+            <div class="subhead">Usage per model</div>
+            <div class="ubars" id="ins-usage-models"></div>
+            <div class="subhead">Tokens per day (30 days)</div>
+            <div id="ins-usage-chart" class="chartwrap"></div>
+            <div class="subhead">Previously used models</div>
+            <div class="scrollx"><table id="ins-usage-history"></table></div>
+          </div>
         </div>
 
-        <div class="subpane on" data-sub="search">
+        <div class="subpane" data-sub="search">
           <div class="card pad">
             <div class="row">
               <div>
@@ -1799,22 +1795,9 @@ function modelBars(models, limit){
     tagTek: m.active ? 'active' : null, tagKelas: 'ok',
     sub: (100 * (m.total || 0) / pool).toFixed(1) + '% of total',
     pct: 100 * (m.total || 0) / pool,
-    nums: fmtTok(m.total) + ' tok · ' + (m.calls || 0).toLocaleString('en-US') + ' calls · ' + m.sessions + ' sessions · cache '
-          + fmtTok(m.cache_read) + ' · est ' + fmtUsd(m.est_usd) + ' · last ' + (m.last_text || '-')
+    nums: fmtTok(m.total) + ' tok · ' + (m.calls || 0).toLocaleString('en-US') + ' calls · ' + m.sessions
+          + ' sessions · est ' + fmtUsd(m.est_usd) + ' · last ' + (m.last_text || '-')
   }));
-}
-function renderModelUsage(u){
-  if (!u || u.error){ setHint('usage-project', 'usage unavailable'); return; }
-  const el = document.getElementById('usage-project'); if (el) el.textContent = u.project;
-  uTiles('model-usage-tiles', usageTilesFrom(u.totals).concat([
-    {k: 'Cache ratio', v: (u.cache_ratio || 0) + '%', d: 'cache read vs input'},
-    {k: 'Models used', v: String(u.totals.models || 0), d: 'active: ' + u.active_model}
-  ]));
-  uBars('model-usage-models', modelBars(u.models));
-  uChart('model-usage-chart', u.days, 'total', 'tokens per day');
-  table('model-usage-history', ['Model', 'Sessions', 'Calls', 'Tokens', 'Cache read', 'Last used'],
-    (u.previous_models || []).map(m => [m.model, m.sessions, m.calls, fmtTok(m.total), fmtTok(m.cache_read), m.last_text]),
-    'No other models in this project history yet.');
 }
 function renderUsageAll(u){
   if (!u || u.error){ setHint('usage-note', 'usage unavailable'); return; }
@@ -1837,11 +1820,10 @@ function renderUsageAll(u){
 async function loadUsage(){
   const sel = document.getElementById('focus');
   const nm = focusProject || (sel ? sel.value : '');
-  if (!nm || !document.getElementById('model-usage-tiles')) return;
+  if (!nm || !document.getElementById('ins-usage-tiles')) return;
   try {
     const u = await (await fetch(`/api/usage?t=${TOKEN}&name=${encodeURIComponent(nm)}`)).json();
-    renderModelUsage(u);
-    renderInsUsage(u);            // the Insights board shows the same project's token usage
+    renderInsUsage(u);            // Insights -> Token usage carries the numbers
   } catch (e) { setHint('usage-project', 'could not load usage'); }
 }
 async function loadUsageAll(){
@@ -1990,28 +1972,44 @@ function rchart(target, buckets, series, opts){
   return {plot: plot, bars: bars, sel: sel};
 }
 
-/* ---------- token usage of the focus project (Insights header) -------------------------------- */
+/* ---------- token usage of the focus project (Insights -> Token usage) ------------------------- */
+function usageTilesFor(u){
+  /* Cache read, the hit rate and the money the cache saved live in the Cache tab: this pane counts
+     what the tokens were (fresh input, output, reasoning) and what they cost. */
+  const t = u.totals || {};
+  return [
+    {k: 'Total tokens', v: fmtTok(t.total), d: fmtTok(t.input) + ' fresh in + ' + fmtTok(t.output) + ' out'},
+    {k: 'Fresh input', v: fmtTok(t.input), d: 'prompt tokens charged at the input price'},
+    {k: 'Output', v: fmtTok(t.output), d: 'what the model wrote back'},
+    {k: 'Reasoning', v: fmtTok(t.reasoning), d: 'thinking tokens'},
+    {k: 'API calls', v: (t.calls || 0).toLocaleString('en-US'), d: (t.sessions || 0) + ' sessions'},
+    {k: 'Models used', v: String(t.models || 0), d: 'active: ' + (u.active_model || '-')},
+    {k: 'Estimated cost', v: fmtUsd(t.est_usd), d: 'third-party price tables, not an invoice'}
+  ];
+}
 function renderInsUsage(u){
-  if (!document.getElementById('ins-usage-kv')) return;
   if (!u || u.error){
-    kv('ins-usage-kv', [['status', 'usage unavailable for this project']]);
+    setHint('usage-project', 'usage unavailable for this project');
     setHint('ins-usage-note', '');
+    setHint('model-cost', 'usage unavailable for this project');
     return;
   }
+  const el = document.getElementById('usage-project');
+  if (el) el.textContent = u.project || '-';
+  uTiles('ins-usage-tiles', usageTilesFor(u));
+  setHint('ins-usage-note', 'Read read-only from ' + (u.project || 'this project')
+    + "'s state.db; the money is an estimate from third-party price tables." +
+    ' The Cache tab shows the prompt-cache side (hit rate, fresh against cached, what it saved).');
+  uBars('ins-usage-models', modelBars(u.models));
+  uChart('ins-usage-chart', u.days, 'total', 'tokens per day');
+  table('ins-usage-history', ['Model', 'Sessions', 'Calls', 'Tokens', 'Last used'],
+    (u.previous_models || []).map(m => [m.model, m.sessions, m.calls, fmtTok(m.total), m.last_text]),
+    'No other models in this project history yet.');
+  /* one line on the Model board: the cost of what you are about to change, pointing here for detail */
   const t = u.totals || {};
-  kv('ins-usage-kv', [
-    ['project', u.project || '-'],
-    ['active model', u.active_model || '-'],
-    ['total tokens', fmtTok(t.total) + '  (' + fmtTok(t.input) + ' in + ' + fmtTok(t.output) + ' out)'],
-    ['fresh input', fmtTok(t.input)],
-    ['output', fmtTok(t.output)],
-    ['reasoning', fmtTok(t.reasoning)],
-    ['api calls', (t.calls || 0).toLocaleString('en-US') + '  (' + (t.sessions || 0) + ' sessions)'],
-    ['estimated cost', fmtUsd(t.est_usd)]
-  ]);
-  setHint('ins-usage-note', 'Read read-only from ' + (u.project || 'this project') + "'s state.db; money is an estimate"
-    + ' from third-party price tables. "total tokens" counts fresh input + output, so cache reads are not in it:'
-    + ' the Cache tab shows them (with the hit rate and what they saved), and the per-model split is in the Model board.');
+  setHint('model-cost', 'usage of this project: ' + fmtTok(t.total) + ' tokens · '
+    + (t.calls || 0).toLocaleString('en-US') + ' calls · ' + (t.sessions || 0) + ' sessions · est '
+    + fmtUsd(t.est_usd) + ' · details in Insights → Token usage and Cache');
 }
 
 /* ---------- prompt cache analytics (Insights -> Cache) ---------------------------------------- */
