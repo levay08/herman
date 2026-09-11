@@ -830,30 +830,52 @@ def confirm(prompt: str, phrase: str | None = None, assume_yes: bool = False) ->
 
 # ----------------------------------------------------------------- tables ---
 
+def _short_path(path: str, limit: int = 26) -> str:
+    """Keep a path cell short so a long workdir cannot push the table past the frame width.
+
+    `fit()` shortens an over-long line in the MIDDLE, which used to eat a critical column (a
+    workdir like /tmp/a/very/long/name turned "gateway down" into "d…"). Capping the path cell keeps
+    every other column intact and only trims the least important one.
+    """
+    text = str(path or "").strip()
+    if len(text) <= limit:
+        return text
+    return "…" + text[-(limit - 1):]
+
+
 def print_projects_table(rows: list[dict], show_index: bool = True):
+    """Project table that adapts to the terminal: the workdir column is dropped when it would not
+    fit, because `fit()` shortens an over-long line in the middle and that used to eat a critical
+    column (a long workdir turned "gateway down" into "d…")."""
     if not rows:
         print("No projects yet. Create the first one: " + bold(f"{PROG} -p myproject"))
         return
     wname = max(max((len(r["name"]) for r in rows), default=7), 7)
-    lines = [dim(f"{'  #' if show_index else '   '} {'project':<{wname}}  {'model':<22}  "
-                 f"{'gateway':<7}  {'skill':>5}  {'memory':>7}  {'last used':<13}  workdir")]
+    inner = max(min(term_width(), 112) - 4, 24)
+    header_head = (f"{'  #' if show_index else '   '} {'project':<{wname}}  {'model':<22}  "
+                   f"{'gateway':<7}  {'skill':>5}  {'memory':>7}  {'last used':<13}")
+    fits_cwd = visible_len(header_head) + 2 + 12 <= inner
+    lines = [dim(header_head + ("  workdir" if fits_cwd else ""))]
     for i, r in enumerate(rows, 1):
         live = r.get("sessions") or []
         mark = "●" if live else ("◆" if r["active"] else " ")
         gw = r["gateway"]
         gw_s = green(gw) if gw == "up" else amber(gw)
         num = f"{i:>2}" if show_index else "  "
-        lines.append(
-            f"{num} {mark}{r['name']:<{wname-1}}  {r['model'][:22]:<22}  {gw_s:<7}  "
-            f"{r['skills']:>5}  {human_size(r['memory_bytes']):>7}  "
-            f"{human_time(r['last_used']):<13}  {r['cwd']}"
-        )
+        head = (f"{num} {mark}{r['name']:<{wname-1}}  {r['model'][:22]:<22}  {gw_s:<7}  "
+                f"{r['skills']:>5}  {human_size(r['memory_bytes']):>7}  {human_time(r['last_used']):<13}")
+        if fits_cwd:
+            head += "  " + _short_path(r["cwd"], 26)
+        lines.append(head)
         for s in live:
             pad = "      " if show_index else "    "
             lines.append(dim(f"{pad}session {s['id']}  ·  {s['surface']}  ·  pid {s['pid']}"
                              f"  ·  up {session_age(s)}"))
     print_frame(f"Projects · {ROOT}", lines, color=green, width=min(term_width(), 112))
-    print(dim(f"  ◆ sticky Hermes profile  ·  ● session running right now (id under the row)"))
+    tail = "  ◆ sticky Hermes profile  ·  ● session running right now (id under the row)"
+    if not fits_cwd:
+        tail += f"  ·  workdir: {PROG} -i <project>"
+    print(dim(tail))
 
 
 def print_info_card(st: dict):
