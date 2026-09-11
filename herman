@@ -35,6 +35,7 @@ import webbrowser
 from pathlib import Path
 
 PROG = "herman"                    # change this one line to rename the tool
+POSIX = os.name == "posix"         # /proc, POSIX signals and file modes exist only on POSIX
 VERSION = "0.1"
 AUTHOR = ""            # no personal name in a public repo
 REPO = "https://github.com/levay08/herman"   # shown wherever the old byline used to be
@@ -534,7 +535,9 @@ def _proc_start_time(pid: int) -> float | None:
                     btime = float(line.split()[1])
                     break
         return btime + start_ticks / ticks
-    except (OSError, IndexError, ValueError):
+    except (OSError, IndexError, ValueError, AttributeError):
+        # Windows has neither /proc nor os.sysconf: no start time is available, so the pid-reuse
+        # guard degrades to plain pid existence instead of raising.
         return None
 
 
@@ -619,9 +622,11 @@ def close_sessions(project: str, *, keep_pid: int | None = None,
             errors.append(f"skipped own/kept pid {pid}")
             continue
         sent = ""
-        for sig, grace, label in ((signal.SIGINT, interrupt_grace, "interrupt"),
-                                  (signal.SIGTERM, term_grace, "terminate"),
-                                  (signal.SIGKILL, 0.3, "kill")):
+        ladder = [(signal.SIGINT, interrupt_grace, "interrupt"),
+                  (signal.SIGTERM, term_grace, "terminate")]
+        if hasattr(signal, "SIGKILL"):
+            ladder.append((signal.SIGKILL, 0.3, "kill"))
+        for sig, grace, label in ladder:
             try:
                 os.kill(pid, sig)
             except OSError as exc:

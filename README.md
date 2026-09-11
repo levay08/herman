@@ -22,7 +22,9 @@ the Hermes CLI.
 
 - Hermes Agent installed and on your PATH (`hermes -V`)
 - Python 3.9+ (standard library only, no pip)
-- Linux or macOS; a terminal emulator only for the "open a session window" button
+- Linux or macOS. Native Windows is not supported yet: herman leans on POSIX signals and `/proc` for
+  live sessions and for stopping one politely, so on Windows run it inside WSL2
+- a terminal emulator only for the "open a session window" button
 
 ## Install
 
