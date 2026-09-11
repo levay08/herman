@@ -104,10 +104,9 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
 - **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections
 - **Maintenance** backups, disk space, about
 
-Notes: loopback only (`--host 0.0.0.0` requires `--allow-external`), state changes are POST-only, and
-destructive actions ask you to type the project name. Usage and insights are read-only reads of your
-`state.db`. The Hermes dashboard (chat, config, keys, MCP, webhooks) stays at `hermes dashboard`,
-port 9119.
+Notes: the panel listens on loopback only, and everything inside it that changes state asks you to
+type the project name first. The Hermes dashboard (chat, config, keys, MCP, webhooks) stays at
+`hermes dashboard`, port 9119.
 
 ## Docker
 
@@ -128,37 +127,13 @@ docker run --rm -v "$HOME/.hermes:/home/herman/.hermes" -p 127.0.0.1:9120:9120 h
 docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
 ```
 
-- the port mapping keeps the panel on your machine; publish it on `0.0.0.0` only behind a reverse
-  proxy with TLS, since the panel itself speaks plain HTTP
+- the port mapping keeps the panel on your machine; keep it that way unless you front it with a
+  reverse proxy
 - mount `~/.hermes` read-only (add `:ro`) for a view-only panel: listing, usage, insights and search
   keep working, actions that write will refuse
 - `Enter session` and the terminal window need a desktop, so run those from the host CLI
 - the engine version inside the image can drift from your host install:
   `docker build --build-arg HERMES_BRANCH=<branch> -t herman .` pins it
-
-## It adapts to your Hermes
-
-herman has no provider settings of its own. Per project it reads `config.yaml` (model, provider,
-base_url, api_key, terminal.cwd), `runtime/active_sessions.json` for live sessions,
-`gateway_state.json` for the gateway, and `state.db` read-only for usage and history.
-
-The model list follows whatever you configured: a custom `base_url` is asked directly (the API key is
-only sent if your project has one), a plain provider such as `openai` or `anthropic` falls back to
-Hermes' own caches, and an unreachable endpoint falls back to those caches, then to your optional
-`models-local.json`, then to the configured model alone. It never errors out.
-
-## Security
-
-Random 192-bit token compared in constant time and exchanged for a cookie; cross-site requests,
-foreign `Origin` and foreign `Host` (DNS rebinding) refused; state changes POST-only; child process
-arguments shape-checked; `nosniff`, `no-referrer`, `X-Frame-Options: DENY` and a strict CSP on every
-response; token, pid, state and backups `0600` inside a `0700` directory; passwords never reach a
-command line; destructive operations back up first (history deletion copies `state.db` before
-touching anything and never touches a running session).
-
-```sh
-herman security      # 38 checks · 38 ok · 0 failed
-```
 
 ## Troubleshooting
 
