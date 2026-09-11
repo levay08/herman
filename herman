@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import sqlite3
+import tarfile
 import signal
 import subprocess
 import getpass
@@ -394,6 +395,34 @@ def save_state(state: dict):
         os.replace(tmp, STATE_FILE)
     except OSError:
         pass
+
+DESC_MAX = 90          # a card keeps a description to two short lines
+
+
+def description(name: str) -> str:
+    """The operator's one-line note about a project.
+
+    It lives in herman's own state (``descriptions``), never in the project's config.yaml: Hermes has
+    no such field, and herman must not invent config keys the engine would not read.
+    """
+    return str((load_state().get("descriptions") or {}).get(name) or "")
+
+
+def set_description(name: str, text: str, *, dry: bool = False) -> str:
+    """Store (or clear, with empty text) a project description. Returns what is stored now."""
+    clean = " ".join((text or "").split())[:DESC_MAX]
+    if dry:
+        return clean
+    st = load_state()
+    desc = dict(st.get("descriptions") or {})
+    if clean:
+        desc[name] = clean
+    else:
+        desc.pop(name, None)
+    st["descriptions"] = desc
+    save_state(st)
+    return clean
+
 
 
 def set_last(name: str):
@@ -779,6 +808,7 @@ def profile_stats(name: str) -> dict:
         "gateway": gateway_state(name),
         "sessions": live_sessions(name),
         "active": active_profile() == name or (name == DEFAULT_HERMES and not active_profile()),
+        "description": description(name),
         "exists": home.exists(),
     }
 
@@ -1051,6 +1081,7 @@ command; the engine stays the Hermes you already have.
      its recorded sessions, messages and token usage. Use -y to run either one unattended
   {PROG} --rename <old> <new>
   {PROG} --alias <name> [--alias-name x] [--alias-remove]
+  {PROG} --describe <name> ["text"]     short note on the card (no text clears it)
   {PROG} -C, --cwd <name> [path]   show/set a project workdir
 
 {bold("HEALTH & HOUSEKEEPING")}
@@ -1330,6 +1361,7 @@ def do_remove(name: str, *, assume_yes: bool = False, dry: bool = False):
         if stt.get("last") == name:
             stt.pop("last", None)
             save_state(stt)
+        set_description(name, "")         # a deleted project keeps no description behind
 
 
 def backup_list(limit: int = 12) -> list[dict]:
@@ -2043,7 +2075,8 @@ def cmd_web(argv: list[str]):
                     mid = 0
                 self._json(message_detail(nm, mid))
                 return
-            if u.path in ("/api/usage", "/api/search", "/api/insights"):
+            if u.path in ("/api/usage", "/api/search", "/api/insights",
+                          "/api/skills", "/api/tools", "/api/soul"):
                 nm = q.get("name", [""])[0] or active_profile() or load_state().get("last") \
                     or DEFAULT_HERMES
                 if not profile_exists(nm):
@@ -2053,6 +2086,12 @@ def cmd_web(argv: list[str]):
                     self._json(usage_report(nm))
                 elif u.path == "/api/search":
                     self._json(search_history(nm, q.get("q", [""])[0]))
+                elif u.path == "/api/skills":
+                    self._json(skills_report(nm))
+                elif u.path == "/api/tools":
+                    self._json(tools_report(nm))
+                elif u.path == "/api/soul":
+                    self._json(soul_report(nm))
                 else:
                     self._json(insights_report(nm))
                 return
@@ -2154,6 +2193,47 @@ def cmd_web(argv: list[str]):
                 state, msg, steps = access_grant(user, host, password=pw or None)
                 self._json({"state": state, "msg": msg, "steps": steps,
                             "ok": state == "ok"}, 200 if state != "error" else 500)
+                return
+            if u.path == "/api/describe":
+                if method != "POST":
+                    self._json({"error": "POST only"}, 400)
+                    return
+                nm = (q.get("name", [""])[0] or "").strip()
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", nm) or not profile_exists(nm):
+                    self._json({"error": "unknown project"}, 400)
+                    return
+                self._json({"ok": True, "name": nm,
+                            "description": set_description(nm, q.get("text", [""])[0])})
+                return
+            if u.path in ("/api/soul-save", "/api/uninstall-skill", "/api/tool-toggle",
+                          "/api/remove-skill"):
+                if method != "POST":
+                    self._json({"error": "POST only"}, 405)
+                    return
+                nm = (q.get("name", [""])[0] or "").strip()
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", nm) or not profile_exists(nm):
+                    self._json({"error": "unknown project"}, 400)
+                    return
+                if u.path == "/api/soul-save":
+                    self._json(save_soul(nm, q.get("text", [""])[0]))
+                    return
+                item = (q.get("item", [""])[0] or "").strip()
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}", item):
+                    self._json({"error": "unexpected skill or tool name"}, 400)
+                    return
+                if u.path == "/api/remove-skill":
+                    self._json(remove_skill(nm, item))
+                    return
+                if u.path == "/api/uninstall-skill":
+                    res = run_hermes(["skills", "uninstall", item, "--yes"], nm, quiet=True)
+                else:
+                    want = (q.get("enabled", ["1"])[0] or "1") in ("1", "true", "yes")
+                    res = run_hermes(["tools", "enable" if want else "disable", item], nm, quiet=True)
+                text = ((res.stdout or "") + (res.stderr or "")).strip()
+                said = engine_error(text)
+                ok_now = res.returncode == 0 and not said
+                self._json({"ok": ok_now, "item": item, "output": text[:600],
+                            "error": "" if ok_now else (said or text[:300] or "the engine refused it")})
                 return
             if u.path == "/api/action":
                 self._stream_action(q, method)
@@ -3708,6 +3788,155 @@ def insights_report(name: str, limit: int = 15) -> dict:
     return out
 
 
+SOUL_MAX_TEXT = 200_000          # the engine reads SOUL.md whole; a sane cap for the panel too
+
+
+def engine_error(text: str) -> str:
+    """The first error line the engine printed, or "" when the output looks clean.
+
+    `hermes tools disable no_such_tool` and `hermes skills uninstall <builtin>` both exit 0 while
+    printing `✗ Unknown toolset ...` / `Error: ... is not a hub-installed skill`. Trusting the return
+    code alone would report a failed action as a success in the panel.
+    """
+    for line in (text or "").splitlines():
+        low = line.strip().lower()
+        if low.startswith("error") or low.startswith("✗") or "not a hub-installed skill" in low:
+            return line.strip()[:200]
+    return ""
+
+
+def skills_report(name: str) -> dict:
+    """Installed skills of one project, as the engine itself lists them.
+
+    The engine owns install/uninstall and knows builtin vs local vs hub, so herman asks it
+    (``hermes -p <name> skills list``) instead of guessing from the skills directory: the answer then
+    matches what the agent will actually load.
+    """
+    ensure_profile(name)
+    res = run_hermes(["skills", "list"], name, quiet=True)
+    rows: list[dict] = []
+    for line in (res.stdout or "").splitlines():
+        if "│" not in line:
+            continue
+        cells = [c.strip() for c in line.strip().strip("│").split("│")]
+        if len(cells) < 5 or cells[0] in ("Name", "") or set(cells[0]) <= set("─━"):
+            continue
+        rows.append({"name": cells[0], "category": cells[1], "source": cells[2],
+                     "trust": cells[3], "status": cells[4]})
+    return {"project": name, "rows": rows, "count": len(rows),
+            "home": str(profile_home(name) / "skills"),
+            "error": "" if res.returncode == 0 else (res.stderr or res.stdout or "skills list failed").strip()[:300]}
+
+
+def remove_skill(name: str, skill: str, *, dry: bool = False) -> dict:
+    """Delete a LOCAL skill folder, after archiving it into herman's own cache.
+
+    Only skills the engine lists as ``local`` are touched: builtin ones live in the install tree and
+    are never deleted from the panel, and hub-installed ones belong to ``hermes skills uninstall``
+    (the engine tracks them). The folder must sit inside the profile's skills tree, so a crafted name
+    can never reach out of it.
+    """
+    ensure_profile(name)
+    rows = {r["name"]: r for r in skills_report(name)["rows"]}
+    row = rows.get(skill)
+    if not row:
+        return {"ok": False, "error": f"no skill named '{skill}' in this project"}
+    if row.get("source") != "local":
+        return {"ok": False, "error": f"'{skill}' is {row.get('source')}: builtin skills are never "
+                                      "deleted from here, hub ones go through `hermes skills uninstall`"}
+    root = profile_home(name) / "skills"
+    if not root.is_dir():
+        return {"ok": False, "error": f"{root} does not exist"}
+    hits = [p for p in root.rglob("SKILL.md")
+            if p.parent.name == skill and p.parent != root
+            and root.resolve() in p.resolve().parents]
+    if not hits:
+        return {"ok": False, "error": f"no folder for skill '{skill}' inside {root}"}
+    folder = hits[0].parent
+    if dry:
+        return {"ok": True, "path": str(folder), "backup": "", "dry": True}
+    bdir = HERMAN_CACHE / "skill-backups"
+    try:
+        bdir.mkdir(parents=True, exist_ok=True)
+        bdir.chmod(0o700)
+    except OSError:
+        pass
+    tar_path = bdir / f"{skill}-{time.strftime('%Y%m%d-%H%M%S')}.tar.gz"
+    try:
+        with tarfile.open(tar_path, "w:gz") as tf:
+            tf.add(folder, arcname=folder.name)
+        tar_path.chmod(0o600)
+        shutil.rmtree(folder)
+    except (OSError, tarfile.TarError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "path": str(folder), "backup": tar_path.name, "dry": False}
+
+
+def tools_report(name: str) -> dict:
+    """Toolsets of one project with their enabled/disabled state (`hermes tools list`)."""
+    ensure_profile(name)
+    res = run_hermes(["tools", "list"], name, quiet=True)
+    sections: list[dict] = []
+    cur: dict | None = None
+    for line in (res.stdout or "").splitlines():
+        stripped = line.strip()
+        if stripped.endswith(":") and "toolset" in stripped.lower():
+            cur = {"title": stripped[:-1], "tools": []}
+            sections.append(cur)
+            continue
+        m = re.match(r"\s*([✓✗])\s+(enabled|disabled)\s+([A-Za-z0-9_:.-]+)\s*(.*)$", line)
+        if m and cur is not None:
+            cur["tools"].append({"name": m.group(3), "enabled": m.group(1) == "✓",
+                                 "label": m.group(4).strip()})
+    return {"project": name, "sections": sections,
+            "count": sum(len(sec["tools"]) for sec in sections),
+            "error": "" if res.returncode == 0 else (res.stderr or res.stdout or "tools list failed").strip()[:300]}
+
+
+def soul_path(name: str) -> Path:
+    """``SOUL.md`` of a project: identity slot #1 in Hermes' system prompt (per profile)."""
+    return profile_home(name) / "SOUL.md"
+
+
+def soul_report(name: str) -> dict:
+    ensure_profile(name)
+    p = soul_path(name)
+    try:
+        exists = p.exists()
+        text = p.read_text(encoding="utf-8", errors="replace") if exists else ""
+        size = p.stat().st_size if exists else 0
+    except OSError as exc:
+        return {"project": name, "path": str(p), "exists": False, "size": 0, "text": "",
+                "truncated": False, "backup": "", "error": str(exc)}
+    return {"project": name, "path": str(p), "exists": exists, "size": size,
+            "text": text[:SOUL_MAX_TEXT], "truncated": len(text) > SOUL_MAX_TEXT,
+            "backups": len(list(p.parent.glob(p.name + ".herman-backup-*"))), "error": ""}
+
+
+def save_soul(name: str, text: str, *, dry: bool = False) -> dict:
+    """Write the project's SOUL.md, keeping a timestamped copy of the old one first."""
+    ensure_profile(name)
+    p = soul_path(name)
+    if len(text.encode("utf-8")) > SOUL_MAX_TEXT:
+        return {"ok": False, "error": f"SOUL.md is limited to {SOUL_MAX_TEXT} bytes by this panel"}
+    if dry:
+        return {"ok": True, "path": str(p), "size": len(text.encode('utf-8')), "backup": "", "dry": True}
+    backup = _backup_file(p) if p.exists() else None
+    if backup is not None:
+        try:
+            backup.chmod(0o600)      # SOUL.md is private text: its copy stays owner-only too
+        except OSError:
+            pass
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        p.chmod(0o600)               # the engine keeps SOUL.md owner-only: match it
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "path": str(p), "size": p.stat().st_size,
+            "backup": backup.name if backup else "", "dry": False}
+
+
 def _ssh_config_path() -> Path:
     return Path.home() / ".ssh" / "config"
 
@@ -4746,6 +4975,8 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
                 st.pop("last", None)
             if st.get("history"):
                 st["history"] = [n for n in st["history"] if n in projects]
+            if st.get("descriptions"):
+                st["descriptions"] = {k: v for k, v in st["descriptions"].items() if k in projects}
             res["removed"].append("saved state entries for removed projects: " + ", ".join(dead))
         else:
             res["removed"].append("saved state entries for removed projects: " + ", ".join(dead)
@@ -5243,6 +5474,24 @@ def main(argv: list[str]) -> int:
         do_usage(name or (rest[1] if len(rest) > 1 and not rest[1].startswith("-") else None),
                  days=int(val("--days", 30) or 30), dry=dry)
         return 0
+    if "--describe" in rest:
+        i = rest.index("--describe")
+        name = rest[i + 1] if i + 1 < len(rest) and not rest[i + 1].startswith("-") else ""
+        if not name:
+            die("usage: " + f"{PROG} --describe <project> [\"text\"] [--clear]")
+        ensure_profile(name)
+        text = "" if "--clear" in rest else " ".join(rest[i + 2:])
+        if text or "--clear" in rest:
+            stored = set_description(name, text, dry=dry)
+            if stored:
+                ok(f"description of {name}: {stored}")
+            else:
+                ok(f"description of {name} cleared")
+        else:
+            cur = description(name)
+            print(f"{name}: " + (cur if cur else "(no description)"))
+        return 0
+
     if has("--rename"):
         i = rest.index("--rename")
         if i + 2 >= len(rest):
