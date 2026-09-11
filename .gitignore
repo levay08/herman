@@ -1,0 +1,9 @@
+# operator data, never published
+models-local.json
+models-paas.json
+*.db
+*.db-wal
+*.db-shm
+history-backups/
+*.log
+__pycache__/

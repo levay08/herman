@@ -1,0 +1,2619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HERMAN · hermes-agent easy management</title>
+<style>
+  :root{
+    color-scheme:light;
+    --bg:#f5f8fa; --surface:#fff; --surface2:#f8fbfc; --surface3:#f1f6f8;
+    --line:#e2eaee; --line2:#eef3f6; --line-strong:#d3dee4;
+    --text:#16242b; --dim:#4f6975; --dim2:#55707c;
+    --teal:#0d9488; --teal-dark:#0f766e; --teal-btn:#0f766e; --teal-btn-hover:#115e59;
+    --teal-soft:#e7f8f4; --teal-line:#a9e2d7;
+    --sky:#2563eb; --amber:#b45309; --danger:#c62f2f; --danger-soft:#fef4f4;
+    --danger-line:#f0c9c9; --danger-line-strong:#e5a9a9; --ok:#0f9d76;
+    --warn-bg:#fff7ed; --warn-line:#fed7aa;
+    --row-hover:#fbfeff; --chip-bg:#fff; --on-solid:#fff; --dot-off:#c3ced4; --grip:#d3e0e5;
+    --code-text:#1e343d; --topbar-bg:rgba(245,248,250,.94);
+    --hero-a:#fff; --hero-b:#fbfefe;
+    --default-soft:#eef4ff; --default-line:#cfe0fb;
+    --card-hover:0 4px 14px rgba(16,40,50,.08); --card-hover-line:#d3dee4;
+    --scrim:rgba(9,14,18,.55);
+    --wm-ink:#0d3b46; --wm-op:.035; --wm-tile:78px; --wm-tile-sm:62px;
+    --brand-a:#10b981; --brand-b:#0891b2; --brand-c:#0369a1;
+    --ok-halo:rgba(15,157,118,.15); --focus-ring:rgba(13,148,136,.13);
+    --r-card:12px; --r-ctl:9px; --r-pill:999px;
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
+    --shadow:0 1px 2px rgba(16,40,50,.05); --shadow-up:0 -6px 20px rgba(16,40,50,.06);
+    --side-w:232px; --head-h:96px; --dock-h:26vh; --content-max:1180px;
+    --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  /* Dark palette: same token names, darker surfaces and lighter accents.
+     Every text token must clear 4.5:1 against the surface it is painted on. */
+  [data-theme="dark"]{
+    color-scheme:dark;
+    --bg:#0e161b; --surface:#151f26; --surface2:#1a252d; --surface3:#1f2c35;
+    --line:#2b3b45; --line2:#233039; --line-strong:#3d515d;
+    --text:#e9f2f5; --dim:#b3c6cd; --dim2:#9db1b9;
+    --teal:#2dd4bf; --teal-dark:#6ee7d5; --teal-btn:#0f6f68; --teal-btn-hover:#0b605a;
+    --teal-soft:#12332e; --teal-line:#1f5f56;
+    --sky:#8ab6ff; --amber:#f2b255; --danger:#ff9a9a; --danger-soft:#3a1d1d;
+    --danger-line:#6b3333; --danger-line-strong:#8a4141; --ok:#3ddc97;
+    --warn-bg:#3a2a15; --warn-line:#6b4d22;
+    --row-hover:#1b262e; --chip-bg:#1b2a33; --on-solid:#fff; --dot-off:#3d515d; --grip:#3d515d;
+    --code-text:#d6e6ec; --topbar-bg:rgba(14,22,27,.9);
+    --hero-a:#18232b; --hero-b:#141e25;
+    --default-soft:#152134; --default-line:#2b4568;
+    --card-hover:0 6px 18px rgba(0,0,0,.45); --card-hover-line:#3d515d;
+    --scrim:rgba(4,8,11,.66);
+    --wm-ink:#8ff0dd; --wm-op:.045; --wm-tile:78px; --wm-tile-sm:62px;
+    --brand-a:#34d399; --brand-b:#22b8d4; --brand-c:#7cb0ff;
+    --ok-halo:rgba(61,220,151,.22); --focus-ring:rgba(45,212,191,.22);
+    --shadow:0 1px 2px rgba(0,0,0,.35); --shadow-up:0 -6px 20px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  ::selection{background:var(--teal-soft);color:var(--text)}
+  *{scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-track{background:transparent}
+  *::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:var(--r-pill);
+                             border:3px solid transparent;background-clip:content-box}
+  *::-webkit-scrollbar-thumb:hover{background:var(--dim2);background-clip:content-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);transition:background-color .16s ease,color .16s ease;
+       font:13.6px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Ubuntu","Cantarell","Helvetica Neue",Arial,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  h1,h2,h3{margin:0;line-height:1.25;letter-spacing:-.01em}
+  p{margin:0}
+  a{color:var(--sky)}
+  code{font-family:var(--mono);font-size:.92em;background:var(--surface3);padding:1px 5px;border-radius:5px}
+  .mono{font-family:var(--mono);font-size:12.6px}
+
+  /* ---------- shell ---------- */
+  .app{display:flex;min-height:100vh;align-items:stretch}
+
+  /* ---------- sidebar ---------- */
+  .side{width:var(--side-w);flex:0 0 var(--side-w);background:var(--surface);
+        border-right:1px solid var(--line);display:flex;flex-direction:column;
+        gap:var(--s3);padding:var(--s4) var(--s3);position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:10px;padding:0 var(--s2) var(--s4);
+         border-bottom:1px solid var(--line2)}
+  .clockbox{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .clock{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.01em;
+         color:var(--text);line-height:1.1}
+  .clock-date{font-size:11.4px;color:var(--dim);white-space:nowrap}
+  .side-label{font-size:10.6px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+              color:var(--dim2);padding:0 var(--s2);margin:var(--s2) 0 2px}
+  .side nav{display:flex;flex-direction:column;gap:2px}
+  .navlink{appearance:none;border:0;background:none;font:inherit;font-size:13.4px;font-weight:550;
+           color:var(--dim);text-align:left;padding:8px 12px;min-height:36px;border-radius:var(--r-ctl);
+           cursor:pointer;display:flex;align-items:center;gap:8px;width:100%}
+  .navlink:hover{background:var(--surface3);color:var(--text)}
+  .navlink.active{background:var(--teal-soft);color:var(--teal-dark);font-weight:650;
+                  box-shadow:inset 2px 0 0 var(--teal)}
+  .navlink .n{margin-left:auto}
+  .n{font-size:11px;font-weight:700;color:var(--dim);background:var(--surface3);
+     border:1px solid var(--line);border-radius:var(--r-pill);padding:0 7px;min-width:20px;text-align:center}
+  .navlink.active .n{background:var(--chip-bg);color:var(--teal-dark)}
+  .side-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px;
+             padding-top:var(--s4);border-top:1px solid var(--line2)}
+  .status-chip{display:flex;align-items:center;gap:8px;font-size:12.3px;color:var(--dim);
+               background:var(--surface2);border:1px solid var(--line2);border-radius:var(--r-ctl);padding:7px 10px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim2);flex:0 0 8px}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 3px var(--ok-halo)}
+  .dot.off{background:var(--dot-off)}
+  .side-note{font-size:11.4px;color:var(--dim2);line-height:1.4;word-break:break-all;padding:0 2px}
+
+  /* ---------- main + page header ---------- */
+  .main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+  .topbar{position:sticky;top:0;z-index:6;background:var(--topbar-bg);
+          backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
+          padding:11px var(--s5) 9px}
+  .topbar-row{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s4);
+              flex-wrap:wrap;max-width:var(--content-max);margin:0 auto}
+  .topbar h1,.topbar h2{font-size:17.5px;font-weight:700}
+  .sub{font-size:12.2px;color:var(--dim);margin-top:1px}
+  .top-actions{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+
+  /* ---------- content ---------- */
+  .content{width:100%;max-width:var(--content-max);margin:0 auto;
+           padding:12px var(--s5) var(--dock-pad,calc(var(--dock-h) + 16px))}
+  .view{display:none}
+  .view.on{display:block}
+  /* rod-of-hermes mark, faint and big, sitting in the dashboard's empty right side */
+  #view-dashboard{position:relative}
+  #view-dashboard > *{position:relative;z-index:1}
+  /* Tiled caduceus pattern: small, aligned tiles repeated over the dashboard background.
+     The mask supplies the shape only, so the layer is one flat tint at a low opacity. */
+  #view-dashboard > .wm{position:fixed;left:var(--side-w);right:0;top:0;bottom:0;
+        z-index:0;pointer-events:none;user-select:none;opacity:var(--wm-op);
+        background:var(--wm-ink);
+        -webkit-mask-image:url('/caduceus.png?t={{TOKEN}}');
+        mask-image:url('/caduceus.png?t={{TOKEN}}');
+        -webkit-mask-repeat:repeat;mask-repeat:repeat;
+        -webkit-mask-size:var(--wm-tile) var(--wm-tile);mask-size:var(--wm-tile) var(--wm-tile);
+        -webkit-mask-position:center top;mask-position:center top}
+  @media (max-width:1180px){ #view-dashboard > .wm{-webkit-mask-size:var(--wm-tile-sm) var(--wm-tile-sm);
+        mask-size:var(--wm-tile-sm) var(--wm-tile-sm)} }
+  @media (max-width:760px){ #view-dashboard > .wm{display:none} }
+
+  /* ---------- tabs (inside each board) ---------- */
+  .subtabs{display:flex;gap:var(--s1);flex-wrap:wrap;border-bottom:1px solid var(--line);
+           margin-bottom:var(--s3);position:sticky;top:var(--head-h);z-index:5;
+           background:var(--bg)}
+  .subtab{appearance:none;background:none;border:0;border-bottom:2px solid transparent;
+          font:inherit;font-size:13.2px;font-weight:600;color:var(--dim);cursor:pointer;
+          padding:8px 11px;display:flex;align-items:center;gap:7px;white-space:nowrap;margin-bottom:-1px}
+  .subtab:hover{color:var(--text)}
+  .subtab.active{color:var(--teal-dark);border-bottom-color:var(--teal)}
+  .subpane{display:none}
+  .subpane.on{display:block;animation:fade .14s ease-out}
+  @keyframes fade{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
+
+  /* ---------- cards ---------- */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
+        box-shadow:var(--shadow);
+        transition:box-shadow .16s ease,border-color .16s ease,background-color .16s ease,transform .16s ease}
+  .card:hover{box-shadow:var(--card-hover);border-color:var(--card-hover-line)}
+  .proj:hover{transform:translateY(-1px)}
+  .card.pad{padding:var(--s4)}
+  .card + .card{margin-top:var(--s3)}          /* stacked cards only */
+  .grid > .card,.tiles > .card{margin-top:0}   /* grid items align on the same line */
+  .hero{padding:var(--s4) var(--s5);display:flex;gap:var(--s4);align-items:center;justify-content:space-between;
+        flex-wrap:wrap;background:linear-gradient(180deg,var(--hero-a),var(--hero-b))}
+  .hero-left{display:flex;flex-direction:column;gap:10px;min-width:0}
+  .logo-wrap{container-type:inline-size;width:100%;overflow:hidden}
+  .logo{margin:0;font-family:var(--mono);font-size:min(10.5px,calc(100cqw / 36));line-height:1.12;
+        white-space:pre;background:linear-gradient(100deg,var(--brand-a),var(--brand-b) 45%,var(--brand-c));
+        -webkit-background-clip:text;background-clip:text;color:transparent;font-weight:700}
+  .logo .ver{font-family:inherit;font-weight:400;font-size:106%;color:var(--dim);letter-spacing:0}
+  .logo-tagline{font-size:12.5px;color:var(--dim);margin-top:-4px;overflow-wrap:anywhere}
+  .logo-tagline a{color:var(--teal-dark);text-decoration:none}
+  .logo-tagline a:hover{text-decoration:underline}
+  .hero-meta{display:flex;flex-direction:column;gap:10px;max-width:330px}
+  .hint{font-size:12.3px;color:var(--dim)}
+  .note{font-size:12.7px;color:var(--dim);line-height:1.55;margin:0 0 var(--s3)}
+  .sec-title{font-size:14px;font-weight:650;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .subhead{font-size:11.3px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+           color:var(--dim2);margin:var(--s4) 0 var(--s2);padding-top:var(--s3);
+           border-top:1px solid var(--line2)}
+  .subhead:first-child{border-top:0;padding-top:0;margin-top:var(--s2)}
+
+  /* ---------- tiles ---------- */
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(198px,1fr));gap:var(--s3)}
+  .grid{align-items:stretch}
+  .tile{padding:var(--s4);display:flex;flex-direction:column;gap:3px}
+  .tile .k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim2)}
+  .tile .v{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .tile .d{font-size:12px;color:var(--dim)}
+
+  /* ---------- grids of cards ---------- */
+  /* ---------- projects: cards on the left, the create form in its own framed column ---------- */
+  .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(292px,344px);
+         gap:var(--s3);align-items:start}
+  .split-main{min-width:0}
+  .create-card{border-color:var(--teal-line);background:var(--surface2);overflow:hidden}
+  .create-card h3{display:flex;align-items:center;gap:8px}
+  .create-card h3::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--teal);
+                          flex:0 0 auto}
+  .create-form{display:flex;flex-direction:column;gap:10px;margin-top:var(--s2)}
+  .create-form button{width:100%}
+  .modal-form{margin:var(--s2) 0 var(--s3)}
+  .modal-form input,.modal-form select{width:100%}
+  @media (max-width:1180px){ .split{grid-template-columns:1fr} }
+
+  /* ---------- usage tiles, bar charts, model bars, search hits ---------- */
+  .ucard-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap}
+  .utiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:var(--s2);
+          margin:var(--s2) 0 var(--s3)}
+  .utile{border:1px solid var(--line2);border-radius:var(--r-ctl);padding:8px 10px;background:var(--surface2)}
+  .utile .k{font-size:10.6px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--dim2)}
+  .utile .v{font-size:15.5px;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+  .utile .d{font-size:11.3px;color:var(--dim)}
+  .chartwrap{margin:var(--s2) 0 var(--s3)}
+  .chart{display:flex;align-items:flex-end;gap:2px;height:118px;
+         border-bottom:1px solid var(--line2);padding-bottom:2px}
+  .chart .col{flex:1 1 0;display:flex;align-items:flex-end;height:100%;min-width:2px}
+  .chart .col i{display:block;width:100%;min-height:2px;border-radius:2px 2px 0 0;
+                background:var(--teal);opacity:.8}
+  .chart .col i.zero{background:var(--line-strong);opacity:.45}
+  .chart-x{display:flex;justify-content:space-between;gap:var(--s2);font-size:10.8px;
+           color:var(--dim2);margin-top:4px}
+  .ubars{display:flex;flex-direction:column;gap:8px;margin:var(--s2) 0 var(--s3)}
+  .ubar{border:1px solid var(--line2);border-radius:var(--r-ctl);padding:8px 10px;background:var(--surface2)}
+  .ubar .r1{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+  .ubar .nm{font-weight:700;font-size:12.8px}
+  .ubar .track{height:7px;border-radius:var(--r-pill);background:var(--surface3);
+               margin:6px 0 5px;overflow:hidden}
+  .ubar .track i{display:block;height:100%;border-radius:var(--r-pill);
+                 background:linear-gradient(90deg,var(--teal),var(--line-strong))}
+  .ubar .nums{font-size:11.6px;color:var(--dim);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+  .hits{display:flex;flex-direction:column;gap:6px;margin-top:var(--s2)}
+  .hit{border:1px solid var(--line2);border-radius:var(--r-ctl);padding:8px 10px;background:var(--surface2)}
+  .hit .top{display:flex;gap:var(--s2);flex-wrap:wrap;font-size:11.4px;color:var(--dim2)}
+  .hit .txt{font-size:12.4px;color:var(--text);margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}
+  .hit mark{background:var(--teal-soft);color:var(--text);border-radius:3px;padding:0 2px}
+  .hit.clickable{cursor:pointer}
+  .hit.clickable:hover{border-color:var(--teal-line);background:var(--row-hover)}
+  .hit.clickable:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+  .hit .open{font-size:11px;color:var(--teal-dark);font-weight:650}
+  .msg-body{margin:0;padding:10px 12px;background:var(--surface3);border:1px solid var(--line2);
+            border-radius:var(--r-ctl);font-family:var(--mono);font-size:12.1px;line-height:1.5;
+            white-space:pre-wrap;overflow-wrap:anywhere;max-height:44vh;overflow:auto;
+            overscroll-behavior:contain}
+  .msgs{display:flex;flex-direction:column;gap:6px;margin:var(--s2) 0 var(--s3)}
+  .msgs .msg{border:1px solid var(--line2);border-radius:var(--r-ctl);padding:7px 10px;
+             background:var(--surface2)}
+  .msgs .top{display:flex;gap:var(--s2);flex-wrap:wrap;font-size:11.2px;color:var(--dim2)}
+  .msgs .txt{font-size:12.1px;color:var(--dim);margin-top:3px;white-space:pre-wrap;
+             overflow-wrap:anywhere;max-height:96px;overflow:hidden}
+  .grid.cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(318px,1fr));gap:var(--s3);
+             align-items:start}
+
+  /* ---------- project cards ---------- */
+  .proj{padding:var(--s4) var(--s4) var(--s3);display:flex;flex-direction:column;gap:10px;
+        height:100%;overflow:hidden}
+  .proj .proj-actions{margin-top:auto}
+  .sess-head{font-size:12.3px;color:var(--dim)}
+  .sess-line{font-size:12.1px;color:var(--dim2);margin-top:2px;overflow-wrap:anywhere}
+  .proj-home{display:flex;align-items:baseline;gap:7px;margin-top:6px;font-size:12.2px;min-width:0}
+  .proj-home .k{color:var(--dim2);flex:0 0 auto}
+  .proj-home .v{color:var(--dim);font-family:var(--mono);font-size:11.6px;min-width:0;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .proj-run{color:var(--teal-dark);font-size:11.6px;font-weight:650;letter-spacing:.01em;
+            white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sess-kill{width:18px;height:18px;min-height:0;padding:0;margin-left:6px;border-radius:5px;
+             font-size:13px;font-weight:700;line-height:1;display:inline-grid;place-items:center;
+             color:var(--danger);border:1px solid var(--danger);background:none;cursor:pointer}
+  .sess-kill:hover{background:var(--danger-soft)}
+  .sess-line{display:flex;align-items:center;gap:4px;justify-content:space-between}
+  @media (prefers-reduced-motion: reduce){
+    .card,.proj,button,body{transition:none}
+    .proj:hover{transform:none}
+    button:active{transform:none}
+  }
+  .proj .btnrow,.proj-actions{gap:6px}
+  .modal-kv{grid-template-columns:auto minmax(0,1fr);gap:3px var(--s3);font-size:12.6px;margin:var(--s2) 0 var(--s3)}
+  .modal-kv dt{font-size:11.9px}
+  .modal-kv dd{white-space:normal;overflow-wrap:anywhere}
+  .modal-kv dd.wide{grid-column:2/-1}
+  .modal-live{margin:var(--s2) 0 0;font-size:12.6px;color:var(--dim)}
+  .proj.active{border-color:var(--teal-line);box-shadow:0 0 0 1px var(--teal-soft)}
+  .proj.default{background:var(--default-soft);border-color:var(--default-line)}
+  .proj-head{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+  .proj-head h3{font-size:15px;font-weight:700}
+  .tag{font-size:11px;font-weight:650;padding:2px 8px;border-radius:var(--r-pill);
+       border:1px solid var(--line);background:var(--surface3);color:var(--dim)}
+  .tag.ok{background:var(--teal-soft);border-color:var(--teal-line);color:var(--teal-dark)}
+  .tag.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--amber)}
+  .proj-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .modal-actions{margin-top:var(--s2)}
+
+  /* ---------- key/value ---------- */
+  .kv{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px var(--s3);align-items:baseline}
+  .kv dt{font-size:12.2px;color:var(--dim);white-space:nowrap}
+  .kv dd{margin:0;font-size:13.2px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
+  /* ---------- tables ---------- */
+  .scrollx{overflow-x:auto;border:1px solid var(--line2);border-radius:10px}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:10.8px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--dim2);
+     text-align:left;padding:9px 12px;background:var(--surface2);border-bottom:1px solid var(--line);
+     white-space:nowrap}
+  td{font-size:13.2px;padding:9px 12px;border-bottom:1px solid var(--line2);vertical-align:middle}
+  tbody tr:last-child td,table tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--row-hover)}
+  td.act{text-align:right;white-space:nowrap}
+  td.act .tiny{margin-left:5px}
+  td.empty{color:var(--dim2);font-size:12.8px;padding:16px 12px;text-align:center}
+
+  /* ---------- forms ---------- */
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:var(--s3);
+       align-items:end}
+  .row > div{display:flex;flex-direction:column;gap:5px;min-width:0}
+  label.f,.row label,.f{font-size:10.8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+                        color:var(--dim2)}
+  input,select{font:inherit;font-size:13.3px;color:var(--text);background:var(--surface);
+               border:1px solid var(--line);border-radius:var(--r-ctl);padding:8px 10px;min-height:36px;
+               width:100%;min-width:0}
+  input::placeholder{color:var(--dim2)}
+  input:focus,select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--focus-ring)}
+  select{cursor:pointer;appearance:none;
+         background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+         background-position:calc(100% - 15px) 15px,calc(100% - 10px) 15px;
+         background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:30px}
+  .row > button{align-self:end;justify-self:start;min-height:36px}
+  select.picker{height:auto;min-height:196px;padding:6px;font-family:var(--mono);font-size:12.4px;
+                line-height:1.5}
+  select.picker option{padding:3px 6px}
+  select.picker optgroup{font-family:inherit;font-weight:700;color:var(--dim2);font-size:11.4px;
+                         text-transform:uppercase;letter-spacing:.05em}
+
+  /* ---------- buttons ---------- */
+  button{font:inherit;font-size:13.2px;font-weight:600;cursor:pointer;border-radius:var(--r-ctl);
+         padding:8px 13px;min-height:36px;border:1px solid var(--line);background:var(--surface);
+         color:var(--text);transition:background .12s ease,border-color .12s ease,box-shadow .12s ease,
+         transform .08s ease}
+  button:active{transform:translateY(1px)}
+  button:hover{background:var(--surface2);border-color:var(--line-strong)}
+  button:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+  button.primary{background:var(--teal-btn);border-color:var(--teal-btn);color:var(--on-solid)}
+  button.primary:hover{background:var(--teal-btn-hover);border-color:var(--teal-btn-hover)}
+  button.ghost{background:none;border-color:var(--line)}
+  button.ghost:hover{background:var(--surface3)}
+  button.danger{background:none;border-color:var(--danger-line);color:var(--danger)}
+  button.danger:hover{background:var(--danger-soft);border-color:var(--danger-line-strong)}
+  button.tiny{min-height:30px;padding:5px 10px;font-size:12.2px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  /* ---------- theme slider ---------- */
+  .switch{appearance:none;background:var(--surface3);border:1px solid var(--line);padding:0;min-height:0;
+          position:relative;width:56px;height:30px;border-radius:var(--r-pill);cursor:pointer;
+          display:inline-flex;align-items:center;transition:background .16s ease,border-color .16s ease}
+  .switch:focus-visible{outline:2px solid var(--sky);outline-offset:3px}
+
+  /* ---------- password dialog ---------- */
+  .modal{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:var(--scrim);
+         padding:var(--s4);overflow:auto;backdrop-filter:blur(2px)}
+  .modal[hidden]{display:none}
+  .modal-card{width:min(430px,92vw);max-height:88vh;overflow:auto;position:relative}
+  .modal-card h3{padding-right:40px}
+  .modal-x{position:absolute;top:9px;right:9px;width:30px;height:30px;min-height:0;padding:0;
+           border-radius:8px;border:1px solid var(--danger-line);background:none;color:var(--danger);
+           font-size:14px;font-weight:700;line-height:1;display:grid;place-items:center;cursor:pointer}
+  .modal-x:hover{background:var(--danger-soft);border-color:var(--danger-line-strong)}
+  .modal-card h3{font-size:15px;margin-bottom:4px}
+  .pw-row{display:flex;gap:var(--s2);align-items:center;margin:6px 0 var(--s3)}
+  .pw-row input{flex:1 1 auto}
+  .sw-knob{position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;
+           display:grid;place-items:center;background:var(--surface);border:1px solid var(--line);
+           box-shadow:var(--shadow);color:var(--teal-dark);font-size:12.5px;line-height:1;
+           transition:transform .18s ease}
+  [data-theme="light"] .sw-i.sw-moon{display:none}
+  [data-theme="dark"] .sw-i.sw-sun{display:none}
+  [data-theme="dark"] .sw-knob{transform:translateX(26px)}
+
+  /* ---------- output dock ---------- */
+  .dock{position:fixed;left:var(--side-w);right:0;bottom:0;z-index:20;background:var(--surface);
+        border-top:1px solid var(--line);box-shadow:var(--shadow-up);
+        border-left:1px solid var(--line)}
+  .dock .head{display:flex;align-items:center;gap:10px;padding:6px var(--s5);min-height:36px}
+  .dock .title{font-size:12.6px;font-weight:700;letter-spacing:.02em}
+  .dock .status{display:flex;align-items:center;gap:7px;font-size:12.3px;color:var(--dim)}
+  .dock .spacer{flex:1}
+  .spin{width:9px;height:9px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--teal);
+        display:none}
+  .status.busy .spin{display:inline-block;animation:spin .7s linear infinite}
+  .status.ok .spin{display:inline-block;background:var(--ok);border-color:var(--ok);animation:none}
+  .status.error .spin{display:inline-block;background:var(--danger);border-color:var(--danger);animation:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .progress{height:2px;background:var(--line2);position:relative;overflow:hidden}
+  .progress i{position:absolute;left:0;top:0;bottom:0;width:35%;background:var(--teal);
+              transform:translateX(-100%);opacity:0}
+  .progress.busy i{opacity:1;animation:slide 1.1s ease-in-out infinite}
+  @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}
+  .dock-grip{height:6px;cursor:ns-resize;background:var(--surface);display:flex;justify-content:center}
+  .dock-grip::after{content:"";width:44px;height:3px;border-radius:var(--r-pill);background:var(--grip);margin-top:2px}
+  .dock-grip:hover::after{background:var(--teal)}
+  #out{margin:0;padding:10px var(--s5) 14px;height:var(--dock-h);max-height:62vh;
+       overflow:auto;overscroll-behavior:contain;
+       font-family:var(--mono);font-size:12.5px;line-height:1.55;color:var(--code-text);
+       background:var(--surface2);white-space:pre-wrap;word-break:break-word}
+  #out .out-empty{color:var(--dim2)}
+  .dock.min #out,.dock.min .dock-grip,.dock.min .progress{display:none}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:1080px){
+    :root{--content-max:100%}
+    .grid.cols{grid-template-columns:1fr}
+  }
+  @media (max-width:900px){
+    .app{display:block}
+    .side{position:static;width:auto;height:auto;flex-direction:row;flex-wrap:wrap;
+          align-items:center;gap:10px;padding:10px var(--s4);border-right:0;border-bottom:1px solid var(--line)}
+    .brand{border:0;padding:0}
+    .side-label{display:none}
+    .side nav{flex-direction:row;flex-wrap:wrap;gap:6px}
+    .navlink{width:auto;padding:7px 11px;background:var(--surface2);border:1px solid var(--line2)}
+    .navlink.active{box-shadow:none;border-color:var(--teal-line)}
+    .side-foot{margin:0 0 0 auto;flex-direction:row;align-items:center;border:0;padding:0}
+    .side-note{display:none}
+    .topbar{padding:9px var(--s4) 8px}
+    .dock{left:0}                       /* the sidebar is a top bar here, so the dock spans the page */
+    .content{padding:10px var(--s4) var(--dock-pad,calc(var(--dock-h) + 14px))}
+    .subtabs{top:0}
+    .hero{padding:var(--s4)}
+  }
+  @media (max-width:560px){
+    .tiles{grid-template-columns:1fr 1fr}
+    .hero-meta{max-width:none}
+    .top-actions{width:100%}
+    .top-actions > div{flex:1 1 160px}
+    #out{padding:10px var(--s3) 14px}
+    .dock .head{padding:8px var(--s3)}
+  }
+</style>
+<script>
+  /* Applied before first paint so the panel never flashes the wrong palette.
+     Default is dark; a stored choice (set by the sidebar slider) wins. */
+  (function(){
+    try{
+      var t = localStorage.getItem('herman.theme');
+      if (t !== 'dark' && t !== 'light') t = 'dark';
+      document.documentElement.dataset.theme = t;
+    }catch(e){ document.documentElement.dataset.theme = 'dark'; }
+  })();
+</script>
+</head>
+<body>
+<div class="app">
+
+  <aside class="side">
+    <div class="brand">
+      <div class="clockbox">
+        <span class="clock" id="clock">--:--:--</span>
+        <span class="clock-date" id="clock-date">loading date</span>
+      </div>
+          <button class="switch" id="theme-toggle" type="button" role="switch" aria-checked="true"
+                  aria-label="Dark theme" onclick="toggleTheme()"
+                  title="Theme: dark · click to switch to light (saved in this browser).">
+            <span class="sw-knob" aria-hidden="true"><span class="sw-i sw-sun">☀</span><span class="sw-i sw-moon">☾</span></span>
+          </button>
+    </div>
+
+    <div class="side-label">Overview</div>
+    <nav id="nav">
+      <button class="navlink" data-route="dashboard">Dashboard</button>
+      <button class="navlink" data-route="projects">Projects <span class="n" id="nav-count">0</span></button>
+    </nav>
+
+    <div class="side-label">Manage</div>
+    <nav>
+      <button class="navlink" data-route="model">Model</button>
+      <button class="navlink" data-route="insights">Insights</button>
+      <button class="navlink" data-route="access">Access</button>
+      <button class="navlink" data-route="maintenance">Maintenance</button>
+    </nav>
+
+    <div class="side-foot">
+      <span class="status-chip"><i class="dot" id="dash-dot"></i><span id="dash-tag">dashboard …</span></span>
+      <button class="primary" id="open-dash" onclick="openDashboard()"
+              title="Starts `hermes dashboard` in the background (port 9119) when needed, then opens it.">
+        Open Hermes dashboard
+      </button>
+      <span class="side-note" id="home-note"></span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-row">
+        <div>
+          <h2 id="view-title">Dashboard</h2>
+          <div class="sub" id="view-sub">Overview of your Hermes projects</div>
+        </div>
+        <div class="top-actions">
+          <div>
+            <label class="f" for="focus">Focus project (boards below follow this)</label>
+            <select id="focus" onchange="onFocusChange()" title="Every project board below shows this project."></select>
+          </div>
+          <button class="primary" onclick="openCreateModal()" title="herman -p <name> · opens the create form in a dialog.">Create new project</button>
+          <button class="ghost" onclick="syncNow()" title="herman sync --fix: re-check herman against the installed Hermes (version, profiles, shortcuts, panel files), repair the harmless ones, then reload every board. The result prints in the output panel.">Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <section class="view" id="view-dashboard">
+        <div class="wm" aria-hidden="true"></div>
+        <div class="card hero">
+          <div class="hero-left">
+            <div class="logo-wrap">
+              <pre class="logo"> ██╗  ██╗███████╗██████╗ ███╗   ███╗ █████╗ ███╗   ██╗
+ ██║  ██║██╔════╝██╔══██╗████╗ ████║██╔══██╗████╗  ██║
+ ███████║█████╗  ██████╔╝██╔████╔██║███████║██╔██╗ ██║
+ ██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══██║██║╚██╗██║
+ ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║██║  ██║██║ ╚████║
+ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝<span class="ver"> v0.1</span></pre>
+            </div>
+            <div class="logo-tagline">hermes-agent · simple task manager<span id="tagline-repo"></span></div>
+          </div>
+          <div class="hero-meta">
+            <div class="hint">HERMAN only manages. Every action calls the installed Hermes engine, so nothing here replaces Hermes.</div>
+          </div>
+        </div>
+
+        <div class="tiles" id="tiles" style="margin-top:16px"></div>
+
+        <div class="card pad" id="usage-card" style="margin-top:16px">
+          <div class="ucard-head">
+            <div class="subhead" style="margin:0;border-top:0;padding-top:0">Token usage · all projects</div>
+            <button class="tiny ghost" onclick="loadUsageAll()" title="Refresh the usage numbers.">Refresh</button>
+          </div>
+          <p class="hint" id="usage-note">…</p>
+          <div class="utiles" id="usage-tiles"></div>
+          <div class="subhead">Tokens per day (30 days)</div>
+          <div id="usage-chart" class="chartwrap"></div>
+          <div class="subhead">Top models</div>
+          <div class="ubars" id="usage-models"></div>
+          <div class="subhead">Per project</div>
+          <div class="scrollx"><table id="usage-projects"></table></div>
+        </div>
+
+      </section>
+
+      <section class="view" id="view-projects">
+        <p class="note">Every card is one Hermes profile: hover a button to see the command it runs. Anything that deletes or rewrites data asks you to type the name first. Model, git and access details live on their own boards.</p>
+        <div class="split">
+          <div class="split-main">
+            <div class="grid cols" id="grid"></div>
+            <p class="hint" id="projects-hint"></p>
+          </div>
+          <aside class="split-side">
+            <div class="card pad create-card">
+              <h3 class="sec-title">Create project</h3>
+              <p class="note">A project is an isolated Hermes profile: its own model, skills, memory and sessions. Creating one also adds a shortcut command with the same name.</p>
+              <div class="create-form">
+                <div>
+                  <label class="f" for="newname">New project name</label>
+                  <input id="newname" placeholder="e.g. archiveweb" autocomplete="off">
+                </div>
+                <div>
+                  <label class="f" for="newmode">Start from</label>
+                  <select id="newmode">
+                    <option value="clean">Empty project</option>
+                    <option value="clone">Copy config, keys and skills</option>
+                    <option value="clone-all">Full copy of the active project</option>
+                  </select>
+                </div>
+                <button class="primary" onclick="createProject()" title="herman -p <name> · progress shows in the output panel.">Create project</button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-model">
+        <div class="subtabs">
+          <button class="subtab active" data-sub="current" onclick="vtab('model','current')">Current model</button>
+          <button class="subtab" data-sub="change" onclick="vtab('model','change')">Change model</button>
+          <button class="subtab" data-sub="usage" onclick="vtab('model','usage')">Token usage</button>
+        </div>
+        <p class="note">The model lives in the project's Hermes config (<code>model.default</code>, <code>model.provider</code>), so Hermes itself picks it up: new sessions of this project use what you set here.</p>
+
+        <div class="subpane on" data-sub="current">
+          <div class="card pad">
+            <p class="hint">project <b id="model-project">…</b></p>
+            <dl class="kv" id="model-kv"></dl>
+            <div class="subhead">Endpoint</div>
+            <p class="hint" id="model-known">…</p>
+            <p class="hint" id="model-sources">…</p>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="usage">
+          <div class="card pad">
+            <p class="hint">project <b id="usage-project">…</b> · numbers read read-only from state.db</p>
+            <div class="utiles" id="model-usage-tiles"></div>
+            <div class="subhead">Usage per model</div>
+            <div class="ubars" id="model-usage-models"></div>
+            <div class="subhead">Tokens per day (30 days)</div>
+            <div id="model-usage-chart" class="chartwrap"></div>
+            <div class="subhead">Previously used models</div>
+            <div class="scrollx"><table id="model-usage-history"></table></div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="change">
+          <div class="card pad">
+            <p class="hint" id="model-endpoint">Loading the model list from the endpoint…</p>
+            <div class="row">
+              <div>
+                <label class="f" for="model-filter">Find a model</label>
+                <input id="model-filter" placeholder="filter by name, e.g. claude, gpt-5, qwen, glm" autocomplete="off" oninput="renderModels()">
+              </div>
+              <div>
+                <label class="f" for="model-provider">Hermes provider</label>
+                <input id="model-provider" placeholder="custom" autocomplete="off">
+              </div>
+            </div>
+            <p class="hint" style="margin-top:8px">Keep the Hermes provider as it is (usually <code>custom</code>): only the model id changes, the endpoint stays the same.</p>
+            <div class="subhead" id="model-source">Models offered by the endpoint</div>
+            <select id="model-name" class="picker" size="11" onchange="pickModel()" aria-label="Models offered by the endpoint"></select>
+            <div class="btnrow" style="margin-top:12px">
+              <button class="primary" onclick="setModel()" title="herman model <project> --set <id> [--provider <p>].">Apply model</button>
+              <button class="ghost" onclick="refreshModels()" title="Ask the endpoint for the list again (skips the cache).">Reload list</button>
+              <span class="hint" id="model-pick-note"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      
+
+      <section class="view" id="view-insights">
+        <div class="subtabs">
+          <button class="subtab active" data-sub="search" onclick="vtab('insights','search')">History search</button>
+          <button class="subtab" data-sub="activity" onclick="vtab('insights','activity')">Activity</button>
+          <button class="subtab" data-sub="tools" onclick="vtab('insights','tools')">Tools</button>
+          <button class="subtab" data-sub="context" onclick="vtab('insights','context')">Context health</button>
+          <button class="subtab" data-sub="errors" onclick="vtab('insights','errors')">Errors</button>
+          <button class="subtab" data-sub="history" onclick="vtab('insights','history')">Delete history</button>
+        </div>
+        <p class="note">Everything below is read read-only from the focus project's <code>state.db</code> and <code>logs/</code>: nothing is written, so it is safe to use while Hermes sessions are running.</p>
+
+        <div class="subpane on" data-sub="search">
+          <div class="card pad">
+            <div class="row">
+              <div>
+                <label class="f" for="search-q">Search the whole message history</label>
+                <input id="search-q" placeholder="e.g. timeout, deploy, api key" autocomplete="off">
+              </div>
+              <button onclick="doSearch()" title="Full-text search over the messages_fts index (LIKE fallback).">Search</button>
+            </div>
+            <p class="hint" id="search-note">Search a word or phrase; newest hits come first.</p>
+            <div id="search-hits" class="hits"></div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="activity">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Messages per day (30 days)</div>
+            <div id="act-chart" class="chartwrap"></div>
+            <div class="subhead">Messages per hour</div>
+            <div id="act-hours" class="chartwrap"></div>
+            <div class="subhead">Daily breakdown</div>
+            <div class="scrollx"><table id="act-table"></table></div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="tools">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Tool usage</div>
+            <div id="tools-bars" class="ubars"></div>
+            <div class="scrollx"><table id="tools-table"></table></div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="context">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Recent sessions: context and compression</div>
+            <div class="scrollx"><table id="ctx-table"></table></div>
+            <p class="hint" id="ctx-note"></p>
+          </div>
+        </div>
+
+        <div class="subpane" id="sub-history" data-sub="history">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Delete history</div>
+            <p class="hint" id="hist-note">…</p>
+            <dl class="kv modal-kv" id="hist-kv"></dl>
+            <div class="row" style="margin-top:10px">
+              <div>
+                <label class="f" for="hist-query">Sessions matching a search (same index as above)</label>
+                <input id="hist-query" placeholder="leave empty to disable" autocomplete="off">
+              </div>
+              <button class="danger ghost" onclick="deleteMatching()" title="herman history <project> --delete-matching <query> · deletes every session whose messages match.">Delete matching</button>
+              <button class="danger" onclick="deleteAllHistory()" title="herman history <project> --delete-all · deletes every stored session of this project.">Delete all history</button>
+            </div>
+            <p class="hint" style="margin-top:8px">A session that is running right now is never touched. Each delete
+              writes a full database copy to <code>history-backups/</code> first, then rebuilds the search index and
+              re-runs the integrity check. The delete needs the project name typed to confirm.</p>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="errors">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">errors.log digest</div>
+            <p class="hint" id="err-sum"></p>
+            <div class="scrollx"><table id="err-table"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-access">
+        <div class="subtabs" id="access-tabs">
+          <button class="subtab active" data-sub="keys" onclick="accessTab('keys')">API keys <span class="n" id="acc-count-keys">0</span></button>
+          <button class="subtab" data-sub="sshkeys" onclick="accessTab('sshkeys')">SSH keys <span class="n" id="acc-count-sshkeys">0</span></button>
+          <button class="subtab" data-sub="git" onclick="accessTab('git')">Git</button>
+          <button class="subtab" data-sub="conn" onclick="accessTab('conn')">Connections <span class="n" id="acc-count-conn">0</span></button>
+        </div>
+        <p class="note" id="access-note">Everything here belongs to the focus project or this machine. Creating or revoking access asks you to type the name first, every edited file is backed up (<code>*.herman-backup-&lt;stamp&gt;</code>) and secrets are never echoed back.</p>
+
+        <div class="subpane on" id="sub-keys" data-sub="keys">
+          <div class="card pad">
+            <p class="hint">two stores: variables in this project <code>.env</code> (names only) and the key the provider actually reads (<code>config.yaml</code>, masked). Values are never shown.</p>
+            <div class="scrollx"><table id="keys-table"></table></div>
+            <div class="subhead">Add or replace a key</div>
+            <div class="row">
+              <div>
+                <label class="f" for="env-var">variable</label>
+                <input id="env-var" placeholder="OPENAI_API_KEY" autocomplete="off">
+              </div>
+              <div>
+                <label class="f" for="env-value">value</label>
+                <input id="env-value" type="password" placeholder="paste the key" autocomplete="new-password">
+              </div>
+              <button class="primary" onclick="saveEnv()" title="herman access set-env <project> <VAR>; written with mode 0600 and sent as POST, never in the URL.">Save key</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="subpane" id="sub-sshkeys" data-sub="sshkeys">
+          <div class="card pad">
+            <p class="hint">every private key found in ~/.ssh on this machine</p>
+            <div class="scrollx"><table id="sshkeys-table"></table></div>
+            <div class="subhead">Add SSH access (username and hostname is all it needs)</div>
+            <div class="row">
+              <div>
+                <label class="f" for="ssh-user">username</label>
+                <input id="ssh-user" placeholder="root" autocomplete="off" style="min-width:110px">
+              </div>
+              <div>
+                <label class="f" for="ssh-host">hostname</label>
+                <input id="ssh-host" placeholder="vps.example.com or 10.0.0.5" autocomplete="off" style="min-width:210px">
+              </div>
+              <button class="primary" onclick="sshGrant()" title="Creates id_ed25519_<host>, adds the ~/.ssh/config entry and installs the public key with ssh-copy-id; the host password is only asked when the host wants one.">Add SSH access</button>
+            </div>
+            <p class="hint" id="ssh-grant-note">One key per host, reused on the next try. A password (when the host asks) goes to ssh-copy-id once through an askpass helper, never on a command line.</p>
+
+            <div class="subhead">SSH hosts in ~/.ssh/config</div>
+            <div class="scrollx"><table id="hosts-table"></table></div>
+
+            <div class="subhead">Hosts this machine has reached (known_hosts)</div>
+            <div class="scrollx"><table id="known-hosts-table"></table></div>
+
+</div>
+        </div>
+
+<div class="subpane" id="sub-git" data-sub="git">
+          <div class="card pad">
+            <p class="hint" id="git-note"></p>
+
+            <div class="subhead">Workdir (Hermes terminal.cwd)</div>
+            <div class="row">
+              <div>
+                <label class="f" for="git-workdir">Folder Hermes works in</label>
+                <input id="git-workdir" placeholder="/home/me/projects/app" autocomplete="off">
+              </div>
+              <button onclick="gitAction('git-set-workdir', {path: v('git-workdir')}, 'workdir')" title="herman -C <project> <path>: writes terminal.cwd in the profile config.">Save workdir</button>
+              <button class="ghost" onclick="runFocus('git-init')" title="herman git <project> init: no-op when the folder is already a repository.">Init repository</button>
+            </div>
+
+            <div class="subhead">Commit identity (repo-local)</div>
+            <div class="row">
+              <div>
+                <label class="f" for="git-user">user.name</label>
+                <input id="git-user" placeholder="Your Name" autocomplete="off">
+              </div>
+              <div>
+                <label class="f" for="git-email">user.email</label>
+                <input id="git-email" placeholder="you@example.com" autocomplete="off">
+              </div>
+              <button onclick="gitAction('git-set-user', {user_name: v('git-user'), user_email: v('git-email')})" title="herman git <project> set-user --name N --email E.">Save identity</button>
+            </div>
+
+            <div class="subhead">Credential helper and remotes</div>
+            <div class="row">
+              <div>
+                <label class="f" for="git-helper">helper</label>
+                <select id="git-helper">
+                  <option value="store">store (plain file, ~/.git-credentials)</option>
+                  <option value="cache">cache (in memory, 15 min)</option>
+                  <option value="none">none (ask every time)</option>
+                </select>
+              </div>
+              <button onclick="gitAction('git-set-helper', {helper: v('git-helper')})" title="herman git <project> set-helper store|cache|none.">Save helper</button>
+            </div>
+            <div class="scrollx" style="margin-top:12px"><table id="git-remotes"></table></div>
+            <div class="row" style="margin-top:12px">
+              <div>
+                <label class="f" for="remote-name">remote name</label>
+                <input id="remote-name" value="origin" autocomplete="off">
+              </div>
+              <div>
+                <label class="f" for="remote-url">remote url</label>
+                <input id="remote-url" placeholder="https://github.com/you/app.git" autocomplete="off">
+              </div>
+              <button onclick="gitAction('git-set-remote', {remote_name: v('remote-name'), url: v('remote-url')})" title="herman git <project> set-remote <name> <url>: adds it, or updates the URL when it already exists.">Save remote</button>
+            </div>
+
+            <div class="subhead">Stored credentials <span class="hint" style="font-weight:400;text-transform:none;letter-spacing:0">~/.git-credentials, tokens never shown</span></div>
+            <div class="scrollx"><table id="gitcred-table"></table></div>
+            <div class="row" style="margin-top:12px">
+              <div>
+                <label class="f" for="cred-host">host</label>
+                <input id="cred-host" placeholder="github.com" autocomplete="off">
+              </div>
+              <div>
+                <label class="f" for="cred-user">user</label>
+                <input id="cred-user" placeholder="your-login" autocomplete="off">
+              </div>
+              <div>
+                <label class="f" for="cred-token">token</label>
+                <input id="cred-token" type="password" placeholder="personal access token" autocomplete="new-password">
+              </div>
+              <button class="primary" onclick="saveCred()" title="herman access gitcred-add <host> <user>; sent as POST and stored with mode 0600.">Save credential</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="subpane" id="sub-conn" data-sub="conn">
+          <div class="card pad">
+            <p class="hint">established sessions right now</p>
+            <div class="scrollx"><table id="conn-table"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-maintenance">
+        <div class="subtabs">
+          <button class="subtab active" data-sub="projects" onclick="vtab('maintenance','projects')">All projects</button>
+          <button class="subtab" data-sub="backups" onclick="vtab('maintenance','backups')">Backups &amp; space</button>
+          <button class="subtab" data-sub="focus" onclick="vtab('maintenance','focus')">This project</button>
+          <button class="subtab" data-sub="about" onclick="vtab('maintenance','about')">About</button>
+        </div>
+        <p class="note">Housekeeping runs through the installed engine, so long jobs stream into the output panel. Project actions use the focus project chosen in the top bar.</p>
+
+        <div class="subpane on" data-sub="projects">
+          <div class="card pad">
+            <p class="hint">runs over every project at once</p>
+            <p class="note">These run over every project and stream into the output panel below. Per-project actions live on the Projects board; project details are on its cards.</p>
+            <div class="btnrow">
+              <button onclick="run('doctor-all')" title="herman -d --all: read-only health check of every project.">Check health of all projects</button>
+              <button class="ghost" onclick="run('list')" title="herman -l: plain project list in the output panel.">List projects</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="backups">
+          <div class="card pad">
+            <p class="note">Backups are plain <code>.tar.gz</code> archives in <code>~/Documents/herman-backup/</code>. Restoring one creates a project from it (<code>herman -x &lt;file&gt; --as name</code>).</p>
+            <div class="btnrow">
+              <button onclick="run('backup-all')" title="herman -b --all: one archive per project.">Back up all projects</button>
+              <button class="ghost" onclick="run('tidy-all')" title="herman --tidy --all: prune old sessions and checkpoints.">Free disk space</button>
+            </div>
+            <div class="subhead">Latest archives</div>
+            <div class="scrollx"><table id="backup-table"></table></div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="focus">
+          <div class="card pad">
+            <div class="btnrow">
+              <button onclick="runFocus('info')" title="herman -i <project>: project card.">Info</button>
+              <button onclick="runFocus('doctor')" title="herman -d <project>: read-only health check.">Doctor</button>
+              <button onclick="runFocus('logs')" title="herman --logs <project>: last 60 log lines.">Log</button>
+              <button onclick="runFocus('usage')" title="herman --usage <project>: tokens and cost.">Usage</button>
+              <button onclick="runFocus('audit')" title="herman --audit <project>: memory and skills summary.">Audit</button>
+              <button onclick="runFocus('backup')" title="herman -b <project>: one archive.">Back up</button>
+              <button onclick="runFocus('tidy')" title="herman --tidy <project>: prune this project only.">Tidy</button>
+              <button class="danger" onclick="removeFocus()" title="herman -r <project>: deletes the profile; type the name to confirm.">Delete project</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="about">
+          <div class="card pad">
+            <dl class="kv" id="about-kv"></dl>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="modal" id="other-modal" hidden>
+      <div class="modal-card card pad">
+        <h3 id="other-title">Session running elsewhere</h3>
+        <p class="hint" id="other-sub"></p>
+        <div class="modal-kv" id="other-list"></div>
+        <div class="btnrow modal-actions">
+          <button class="primary" id="other-continue" onclick="otherContinue()"
+                  title="Start the new session and leave the other one running.">Continue anyway</button>
+          <button class="danger" id="other-close" onclick="otherCloseAndContinue()"
+                  title="Terminate every process of those projects, then start this session. The killed session cannot be resumed.">Close those sessions and continue</button>
+        </div>
+        <button class="modal-x" onclick="closeOther()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+      </div>
+    </div>
+
+    <div class="modal" id="proj-modal" hidden>
+      <div class="modal-card card pad">
+        <h3 id="proj-title">Project</h3>
+        <div class="modal-live" id="proj-live-box"></div>
+        <dl class="kv modal-kv" id="proj-meta"></dl>
+        <div class="btnrow modal-actions">
+          <button class="primary" id="proj-focus" title="Show this project in the Model, Access and Git boards and make it the active project.">Focus</button>
+          <button id="proj-log" title="herman --logs <project> · last 60 log lines.">Log</button>
+          <button id="proj-doctor" title="herman -d <project> · read-only health check.">Doctor</button>
+          <button id="proj-backup" title="herman -b <project> · writes a dated archive.">Back up</button>
+          <button class="danger" id="proj-delete" title="herman -r <project> · removes the profile; you type the project name to confirm.">Delete</button>
+        </div>
+        <button class="modal-x" onclick="closeProj()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+      </div>
+    </div>
+
+    <div class="modal" id="msg-modal" hidden>
+      <div class="modal-card card pad">
+        <h3 id="msg-head">Message</h3>
+        <p class="hint" id="msg-meta">…</p>
+        <dl class="kv modal-kv" id="msg-session"></dl>
+        <div class="subhead" id="msg-before-head">Earlier in this session</div>
+        <div id="msg-before" class="msgs"></div>
+        <div class="subhead">This message</div>
+        <pre id="msg-body" class="msg-body"></pre>
+        <div class="subhead" id="msg-after-head">Next in this session</div>
+        <div id="msg-after" class="msgs"></div>
+        <div class="btnrow modal-actions">
+          <button onclick="copyMsg()" title="Copy this message to the clipboard.">Copy message</button>
+          <button class="ghost" onclick="gotoSession()" title="Open this session in the Hermes dashboard." id="msg-session-link">Open session</button>
+          <button class="danger" onclick="deleteThisMessage()" title="herman history <project> --delete-message <id> · deletes this one message; a database backup is written first.">Delete message</button>
+          <button class="danger ghost" onclick="deleteThisSession()" title="herman history <project> --delete-session <id> · deletes the whole session this message belongs to.">Delete session</button>
+        </div>
+        <button class="modal-x" onclick="closeMsg()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+      </div>
+    </div>
+
+    <div class="modal" id="create-modal" hidden>
+      <div class="modal-card card pad">
+        <h3>Create project</h3>
+        <p class="hint">A project is an isolated Hermes profile: its own model, skills, memory and
+          sessions. Creating one also adds a shortcut command with the same name.</p>
+        <div class="create-form modal-form">
+          <div>
+            <label class="f" for="newname-m">New project name</label>
+            <input id="newname-m" placeholder="e.g. archiveweb" autocomplete="off">
+          </div>
+          <div>
+            <label class="f" for="newmode-m">Start from</label>
+            <select id="newmode-m">
+              <option value="clean">Empty project</option>
+              <option value="clone">Copy config, keys and skills</option>
+              <option value="clone-all">Full copy of the active project</option>
+            </select>
+          </div>
+        </div>
+        <div class="btnrow modal-actions">
+          <button class="primary" onclick="createProjectDialog()" title="herman -p <name> · progress shows in the output panel.">Create project</button>
+        </div>
+        <button class="modal-x" onclick="closeCreateModal()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+      </div>
+    </div>
+
+    <div class="modal" id="src-modal" hidden>
+      <div class="modal-card card pad">
+        <h3>Where these numbers come from</h3>
+        <p class="hint" id="src-lead">This panel reads local files and asks your model endpoint. Nothing is uploaded and no credential leaves this machine.</p>
+        <dl class="kv modal-kv" id="src-list">
+          <dt>Token usage</dt>
+          <dd>Read read-only from the project's local Hermes database (<code>state.db</code>, table
+            <code>session_model_usage</code>) plus <code>messages</code> and <code>sessions</code>. Counts are what
+            Hermes itself recorded, per model and per day.</dd>
+          <dt>Insights</dt>
+          <dd>Same local database (per-day and per-hour message counts, tool usage, session context and
+            compression state) and the project's <code>logs/errors.log</code> digest.</dd>
+          <dt>Model list</dt>
+          <dd>Fetched from the endpoint configured in this project (<code>model.base_url</code>, for example
+            <code>https://api.example.com</code>) via <code>/v1/models</code>, cached for 12 hours, with an
+            optional local catalog file as fallback when the endpoint cannot be reached. The endpoint is
+            whatever that machine configured, never a built-in one.</dd>
+          <dt>Cost estimate</dt>
+          <dd>Token counts multiplied by third-party price tables (the local models.dev cache and any local catalog file). Treat it as an estimate, not an invoice.</dd>
+        </dl>
+        <div class="btnrow modal-actions">
+          <button class="primary" onclick="dismissSources()" title="Remember this and stop showing the notice.">Got it</button>
+        </div>
+        <button class="modal-x" onclick="dismissSources()" aria-label="Close" title="Close this notice (Escape also closes it).">✕</button>
+      </div>
+    </div>
+
+    <div class="modal" id="pw-modal" hidden>
+      <div class="modal-card card pad">
+        <h3 id="pw-title">Password required</h3>
+        <p class="hint" id="pw-sub"></p>
+        <div class="pw-row">
+          <input id="pw-input" type="password" autocomplete="new-password" spellcheck="false"
+                 placeholder="host password" aria-label="host password">
+          <button class="tiny ghost" id="pw-eye" onclick="togglePw()" aria-pressed="false"
+                  title="Show or hide the typed password on screen.">Show</button>
+        </div>
+        <div class="btnrow">
+          <button class="primary" onclick="submitPw()" title="Send the password once to ssh-copy-id (askpass helper); the field is cleared right after.">Install key</button>
+        </div>
+        <button class="modal-x" onclick="closePw()" aria-label="Close" title="Cancel and discard the typed password (Escape also closes it).">✕</button>
+      </div>
+    </div>
+
+    <div class="dock" id="dock">
+      <div class="head">
+        <span class="title">Output</span>
+        <span class="status" id="status"><i class="spin"></i><span id="status-text">Idle · pick an action anywhere.</span></span>
+        <span class="spacer"></span>
+        <div class="btnrow">
+          <button class="tiny ghost" onclick="toggleDock()" id="dock-btn" title="Collapse or expand the output panel.">Collapse</button>
+          <button class="tiny ghost" onclick="copyOut()" title="Copy the output text.">Copy</button>
+          <button class="tiny ghost" onclick="clearOut()" title="Clear the output panel.">Clear</button>
+        </div>
+      </div>
+      <div class="progress idle" id="progress"><i></i></div>
+      <div class="dock-grip" id="dock-grip" title="Drag up to enlarge the output panel (double-click to reset)."></div>
+      <pre id="out"><span class="out-empty">No action running. Progress and results appear here.</span></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = "{{TOKEN}}";
+const PAGE_REV = "{{REV}}";
+const DEFAULT_PROJECT = 'default';     // the root profile: tinted so it stands apart from clones
+const out = document.getElementById('out');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('status-text');
+const progress = document.getElementById('progress');
+let src = null, timer = null, started = 0, lastAction = '', projects = [], focusProject = '', dashInfo = {};
+
+const v = id => (document.getElementById(id).value || '').trim();
+function setHint(id, text){ const el = document.getElementById(id); if (el) el.textContent = text; }
+function fmtUp(sec){
+  const m = Math.floor((sec || 0) / 60);
+  return m < 60 ? m + 'm' : (Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0'));
+}
+
+/* ---------- output ---------- */
+function classify(line){
+  const t = line.trim();
+  if (t.startsWith('$')) return 'cmd';
+  if (t.startsWith('✓')) return 'ok';
+  if (/^(✗|✖|❌)/.test(t) || /\b(error|failed)\b/i.test(t)) return 'err';
+  if (t.startsWith('!') || /\bwarn/i.test(t)) return 'warn';
+  if (t.startsWith('[done]')) return 'done';
+  return 'plain';
+}
+function say(line){
+  const el = document.createElement('span');
+  el.className = 'ln ' + classify(line);
+  el.textContent = line + '\n';
+  out.appendChild(el);
+  out.scrollTop = out.scrollHeight;
+  const dock = document.getElementById('dock');
+  if (dock.classList.contains('min')) applyDockMin(false, false);
+}
+function clearOut(){ out.textContent = ''; }
+function resetOut(msg){ out.textContent = ''; if (msg) say(msg); }
+function setStatus(state, text){
+  statusEl.className = 'status ' + state;
+  statusText.textContent = text;
+  progress.className = 'progress' + (state === 'running' ? '' : ' idle');
+}
+const DOCK_MIN_KEY = 'herman.dock.min';
+function syncDockPad(){
+  /* The dock is fixed; the content needs exactly its height as bottom padding, and a
+     collapsed dock must not leave a 26vh hole under the last card. */
+  const dock = document.getElementById('dock');
+  if (!dock) return;
+  document.documentElement.style.setProperty(
+    '--dock-pad', Math.round(dock.getBoundingClientRect().height) + 16 + 'px');
+}
+function applyDockMin(min, store){
+  const dock = document.getElementById('dock');
+  if (!dock) return;
+  dock.classList.toggle('min', !!min);
+  const b = document.getElementById('dock-btn');
+  if (b) b.textContent = min ? 'Expand' : 'Collapse';
+  if (store) { try { localStorage.setItem(DOCK_MIN_KEY, min ? '1' : '0'); } catch (e) {} }
+  syncDockPad();
+}
+function toggleDock(){
+  const dock = document.getElementById('dock');
+  applyDockMin(!dock.classList.contains('min'), true);
+}
+function copyOut(){
+  navigator.clipboard.writeText(out.innerText).then(
+    () => setStatus('done', 'Output copied.'),
+    () => setStatus('error', 'Copy failed · select the text manually.')
+  );
+}
+function startTimer(label){
+  started = Date.now();
+  setStatus('running', (label || 'Working…') + ' 0s');
+  clearInterval(timer);
+  timer = setInterval(() => {
+    const s = Math.round((Date.now() - started) / 1000);
+    setStatus('running', (label || 'Working…') + ' ' + s + 's');
+  }, 1000);
+}
+function finishStream(){
+  clearInterval(timer);
+  setStatus('done', 'Finished in ' + ((Date.now() - started) / 1000).toFixed(1) + 's');
+  refreshAll();
+}
+
+/* ---------- routing ---------- */
+const TITLES = {
+  dashboard: ['Dashboard', 'Overview of your Hermes projects'],
+  projects: ['Projects', 'One card per Hermes profile'],
+  model: ['Model', 'Which AI model this project uses'],
+  insights: ['Insights', 'Token usage, history search, activity, tools and health of the focus project'],
+  access: ['Access', 'Keys, hosts, credentials and connections of the focus project'],
+  maintenance: ['Maintenance', 'Health, backups and housekeeping']
+};
+const ROUTE_LOAD = {
+  dashboard: () => refresh(),
+  projects: () => refresh(),
+  model: () => { loadFocus(); loadUsage(); },
+  insights: () => { loadInsights(); loadUsage(); },
+  access: () => loadFocus(),
+  maintenance: () => refreshAll()
+};
+function navigate(route){
+  const r = TITLES[route] ? route : 'dashboard';
+  document.querySelectorAll('.view').forEach(el => el.classList.toggle('on', el.id === 'view-' + r));
+  document.querySelectorAll('.navlink').forEach(b => b.classList.toggle('active', b.dataset.route === r));
+  vtabRestore(r);
+  document.getElementById('view-title').textContent = TITLES[r][0];
+  document.getElementById('view-sub').textContent = TITLES[r][1];
+  if (location.hash !== '#/' + r) history.replaceState(null, '', '#/' + r);
+  maybeSources(r);
+  const loader = ROUTE_LOAD[r];
+  if (loader) loader();               // every tab pulls its own data
+  window.scrollTo({top:0});
+}
+function onFocusChange(){
+  loadFocus();                        // model, git and access follow the focus project
+  loadUsage();                        // usage + insights are per project too
+  loadInsights();
+  activateProject(document.getElementById('focus').value);
+}
+async function activateProject(name){
+  /* Picking a focus project also makes it Hermes' sticky default (hermes profile use). */
+  if (!name) return;
+  try{
+    const d = await (await fetch(`/api/set-active?t=${TOKEN}&name=${encodeURIComponent(name)}`,
+                                 {method: 'POST'})).json();
+    if (!d.ok){
+      say('✗ ' + (d.error || 'could not set the active project'));
+      setStatus('error', 'Active project unchanged.');
+      return;
+    }
+    say('✓ active project set to ' + d.active + '   (hermes profile use ' + d.active + ')');
+    setStatus('ok', 'Active project: ' + d.active);
+    await refresh();                  // tiles, cards and the "(active)" marker follow
+  }catch(e){
+    say('✗ ' + e);
+    setStatus('error', 'Active project unchanged.');
+  }
+}
+
+window.addEventListener('hashchange', () => navigate(location.hash.replace('#/','')));
+
+/* ---------- data ---------- */
+function about(d){
+  kv('about-kv', [
+    ['tool', (d && d.tool ? d.tool.toUpperCase() + ' ' + (d.version || '') : 'HERMAN') + ' · hermes-agent · simple task manager'],
+    ['repo', (d && d.repo) || 'not set'],
+    ['panel', 'http://127.0.0.1:' + (location.port || '9120')],
+    ['dashboard', dashInfo.url || 'http://127.0.0.1:9119/'],
+    ['mode', 'local only · token protected'],
+  ]);
+}
+
+async function loadAbout(){
+  /* One source for the project link: the REPO constant in herman, served by /api/health. A fork
+     just changes that constant; the markup itself carries no name or address. */
+  try {
+    const d = await (await fetch(`/api/health?t=${TOKEN}`)).json();
+    const el = document.getElementById('tagline-repo');
+    if (el){
+      el.textContent = '';
+      if (d.repo){
+        const a = document.createElement('a');
+        a.href = d.repo; a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = ' · ' + String(d.repo).replace(/^https?:\/\//, '');
+        a.title = d.repo;
+        el.appendChild(a);
+      }
+    }
+    about(d);
+  } catch (e) { /* offline or older server: keep whatever the markup says */ }
+}
+
+async function refreshAll(){
+  await refresh(); await loadFocus(); await backupTable(); await loadUsageAll(); await loadAbout();
+}
+
+async function backupTable(){
+  const t = document.getElementById('backup-table');
+  if (!t) return;
+  let d = {backups: []};
+  try { d = await (await fetch(`/api/backups?t=${TOKEN}`)).json(); } catch (e) { d = {backups: []}; }
+  table('backup-table', ['Archive', 'Size', 'Created'], (d.backups || []).map(b => [b.name, b.size, b.when]),
+    'No archives yet · press "Back up all projects" to make one.');
+}
+
+async function refresh(){
+  const d = await (await fetch(`/api/projects?t=${TOKEN}`)).json();
+  if (reloadOnNewBuild(d)) return;
+  liveSig = projectsSig(d);
+  renderProjects(d);
+}
+
+/* Live sessions change on their own (a CLI opens/closes); re-render only when the
+   projects/sessions/active signature actually moved, so nothing flickers while typing. */
+function projectsSig(d){
+  return JSON.stringify(d.projects.map(p => [p.name, (p.sessions || []).map(s => s.id), p.active, p.gateway]));
+}
+async function pollLive(){
+  if (document.hidden) return;
+  try{
+    const d = await (await fetch(`/api/projects?t=${TOKEN}`)).json();
+    if (reloadOnNewBuild(d)) return;
+    const sig = projectsSig(d);
+    if (sig === liveSig) return;
+    liveSig = sig;
+    renderProjects(d);
+  }catch (e) { /* panel still fine, try again next tick */ }
+}
+
+function reloadOnNewBuild(d){
+  /* A tab opened before an update keeps running the old page; the server stamps every
+     /api/projects answer with the page revision, so the tab reloads itself once. */
+  if (!d || !d.page_rev) return false;
+  if (PAGE_REV.indexOf('{') !== -1) return false;   // server did not stamp this page
+  if (d.page_rev === PAGE_REV) return false;
+  setStatus('warn', 'Panel updated on the server · reloading…');
+  setTimeout(() => location.reload(), 700);
+  return true;
+}
+function renderProjects(d){
+  projects = d.projects;
+  dashInfo = d.dashboard || {};
+  document.getElementById('nav-count').textContent = d.projects.length;
+  const homeDir = d.projects[0] ? d.projects[0].home.replace(/\/[^/]+$/, '') : '~/.hermes';
+  document.getElementById('home-note').textContent = 'projects home: ' + homeDir;
+  document.getElementById('dash-tag').textContent = 'dashboard ' + (dashInfo.running ? 'running' : 'stopped');
+  document.getElementById('dash-dot').className = 'dot ' + (dashInfo.running ? 'on' : 'off');
+
+  const sel = document.getElementById('focus');
+  const keep = focusProject || d.active;
+  sel.textContent = '';
+  d.projects.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p.name; o.textContent = p.name + (p.name === d.active ? '  (active)' : '');
+    sel.appendChild(o);
+  });
+  sel.value = d.projects.some(p => p.name === keep) ? keep : (d.projects[0] || {}).name || '';
+  focusProject = sel.value;
+
+  tiles(d);
+  grid(d.projects);
+  about(d);
+  backupTable();
+  setHint('projects-hint', d.projects.length
+    ? ''
+    : 'No projects yet · create one from the Dashboard view.');
+}
+
+function tiles(d){
+  const el = document.getElementById('tiles');
+  el.textContent = '';
+  const mk = (k, val, sub) => {
+    const c = document.createElement('div');
+    c.className = 'card tile';
+    const a = document.createElement('div'); a.className = 'k'; a.textContent = k;
+    const b = document.createElement('div'); b.className = 'v'; b.textContent = val;
+    const s = document.createElement('div'); s.className = 'd'; s.textContent = sub || '';
+    c.append(a, b, s); return c;
+  };
+  el.append(
+    mk('Hermes active profile', d.active, 'sticky profile, set with hermes profile use'),
+    mk('Projects', d.projects.length, 'isolated profiles'),
+    mk('Engine', d.engine, 'Hermes Agent installed'),
+    mk('Dashboard', dashInfo.running ? 'running' : 'stopped', dashInfo.running ? dashInfo.url : 'start it from the sidebar')
+  );
+}
+
+function projRow(p){
+  const tr = document.createElement('tr');
+  [p.name + (p.active ? '  (active)' : ''), p.model, String(p.skills), fmtSize(p.memory_bytes),
+   fmtTime(p.last_used), p.cwd].forEach(txt => {
+    const td = document.createElement('td'); td.textContent = txt; tr.appendChild(td);
+  });
+  const act = document.createElement('td'); act.className = 'act';
+  const b = document.createElement('button');
+  b.className = 'tiny'; b.textContent = 'Enter session';
+  b.title = 'Open a terminal window running this project.';
+  b.onclick = () => openTerminal(p.name);
+  act.appendChild(b); tr.appendChild(act);
+  return tr;
+}
+/* ---------- focus views ---------- */
+async function loadFocus(){
+  focusProject = document.getElementById('focus').value || focusProject;
+  if (!focusProject && projects.length) focusProject = projects[0].name;
+  if (!focusProject){
+    kv('model-kv', [['status', 'waiting for the project list…']]);
+    setHint('git-note', 'waiting for the project list…');
+    return;
+  }
+  kv('model-kv', [['project', focusProject], ['status', 'loading…']]);
+  setHint('git-note', 'loading ' + focusProject + '…');
+  await Promise.all([
+    fetch(`/api/model?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`).then(r => r.json()).then(modelView),
+    fetch(`/api/git?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`).then(r => r.json()).then(gitView),
+    fetch(`/api/access?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`).then(r => r.json()).then(accessView)
+  ]);
+}
+function kv(id, rows){
+  const el = document.getElementById(id);
+  el.textContent = '';
+  rows.forEach(([k, val]) => {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = val === null || val === undefined ? '-' : val;
+    el.append(dt, dd);
+  });
+}
+let modelCatalog = [], modelCurrent = '', modelProvider = '';
+
+function renderModels(){
+  const sel = document.getElementById('model-name');
+  if (!sel) return;
+  const f = (document.getElementById('model-filter').value || '').toLowerCase().trim();
+  const keep = sel.value || modelCurrent;
+  sel.textContent = '';
+  const byProv = new Map();
+  modelCatalog.forEach(m => {
+    const hay = (m.id + ' ' + (m.provider || '')).toLowerCase();
+    if (f && !hay.includes(f)) return;
+    const prov = m.provider || 'endpoint';
+    if (!byProv.has(prov)) byProv.set(prov, []);
+    byProv.get(prov).push(m);
+  });
+  if (!byProv.size){
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = 'No model matches this filter.';
+    sel.appendChild(o); return;
+  }
+  byProv.forEach((items, prov) => {
+    const g = document.createElement('optgroup');
+    g.label = prov + ' (' + items.length + ')';
+    items.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m.id;
+      const bits = [];
+      if (m.input_usd) bits.push('in $' + m.input_usd);
+      if (m.output_usd) bits.push('out $' + m.output_usd);
+      const price = bits.join(' / ');
+      o.textContent = m.id + '   ' + (m.context ? m.context : '') + (price ? '   ' + price : '');
+      o.title = m.id + ' · ' + prov + (m.context ? ' · ' + m.context : '') + (price ? ' · ' + price : '');
+      if (m.id === modelCurrent) o.textContent += '   (current)';
+      g.appendChild(o);
+    });
+    sel.appendChild(g);
+  });
+  const opts = [...sel.querySelectorAll('option')];
+  const hit = opts.find(o => o.value === keep);
+  sel.value = hit ? keep : (opts[0] ? opts[0].value : '');
+  pickModel();
+}
+
+function pickModel(){
+  const id = document.getElementById('model-name').value;
+  const m = modelCatalog.find(x => x.id === id);
+  const note = document.getElementById('model-pick-note');
+  if (!m){ if (note) note.textContent = ''; return; }
+  const bits = [];
+  if (m.input_usd) bits.push('in $' + m.input_usd);
+  if (m.output_usd) bits.push('out $' + m.output_usd);
+  const price = bits.length ? bits.join(' / ') + ' per 1M tokens' : '';
+  if (note) note.textContent = [m.id, 'vendor ' + (m.provider || '-'),
+                                m.context ? 'context ' + m.context : '', price]
+                               .filter(Boolean).join(' · ');
+}
+
+async function refreshModels(){
+  setHint('model-endpoint', 'Asking the endpoint for the model list…');
+  const m = await (await fetch(`/api/model?t=${TOKEN}&name=${encodeURIComponent(focusProject)}&refresh=1`)).json();
+  modelView(m);
+}
+
+function modelView(m){
+  kv('model-kv', [
+    ['model', m.model === '-' ? 'not set (Hermes falls back to the provider default)' : m.model],
+    ['provider', m.provider === '-' ? 'not set' : m.provider],
+    ['base_url', m.base_url === '-' ? 'provider default' : m.base_url],
+  ]);
+  const mp = document.getElementById('model-project'); if (mp) mp.textContent = m.project;
+  const ms = document.getElementById('model-sources');
+  if (ms){
+    const srcName = {live: 'live /v1/models', cache: 'cached /v1/models',
+                     hermes: "Hermes' own local model data", 'provider-cache': "Hermes' provider cache",
+                     file: 'local catalog file', config: "this project's configured model only",
+                     none: 'none'};
+    ms.textContent = 'sources · usage & insights: local Hermes state.db (read only) · model list: '
+      + (srcName[m.catalog_source] || m.catalog_source || '-') + ' at '
+      + (m.catalog_endpoint || m.base_url || '-') + ' · prices: models.dev / local catalog (estimate).';
+  }
+  modelCatalog = m.catalog || [];
+  modelCurrent = m.model === '-' ? '' : m.model;
+  modelProvider = m.provider === '-' ? '' : m.provider;
+  document.getElementById('model-provider').value = m.provider === '-' ? '' : m.provider;
+  const src = {live: 'live list from the endpoint', cache: 'cached list from the endpoint',
+               hermes: "Hermes' own local model data (no custom base_url)",
+               'provider-cache': "Hermes' cached model ids for this provider",
+               file: 'optional local catalog file (models-local.json)',
+               config: "only the project's configured model is known",
+               none: 'no list available'};
+  const e = document.getElementById('model-endpoint');
+  if (e) {
+    if (!modelCatalog.length){
+      e.textContent = 'No model list available. Set model.base_url for this project, or run '
+        + 'hermes model once so the engine fetches its own provider list.';
+    } else if (m.catalog_source === 'live' || m.catalog_source === 'cache'){
+      e.textContent = 'Endpoint ' + (m.catalog_endpoint || m.base_url) + ' answers with '
+        + modelCatalog.length + ' models (' + src[m.catalog_source] + '). Pick one below, then press Apply model.';
+    } else {
+      e.textContent = 'No model list from the project endpoint: showing ' + modelCatalog.length
+        + ' models from ' + (src[m.catalog_source] || m.catalog_source) + '. Pick one below, then press Apply model.';
+    }
+  }
+  const so = document.getElementById('model-source');
+  if (so) so.textContent = modelCatalog.length
+    ? (m.catalog_source === 'live' || m.catalog_source === 'cache'
+       ? 'Models offered by ' + (m.catalog_endpoint || m.base_url)
+       : 'Models from ' + (src[m.catalog_source] || m.catalog_source))
+    : 'Models offered by the endpoint';
+  setHint('model-known', (m.base_url === '-' ? 'not set' : m.base_url)
+          + ' · provider ' + (m.provider === '-' ? 'not set' : m.provider)
+          + ' · api key ' + (m.key_present ? 'present' : 'missing'));
+  renderModels();
+  pickModel();
+}
+function gitView(g){
+  if (!g.repo){
+    setHint('git-note', 'No repository yet' + (g.workdir ? ' in ' + g.workdir : '')
+      + ' · set the workdir below, Save workdir, then Init repository.');
+  } else {
+    setHint('git-note', g.root + ' · ' + (g.branch || '(no commits yet)')
+      + (g.ahead !== null ? ' · ahead ' + g.ahead + ' / behind ' + g.behind : '')
+      + ' · ' + g.dirty + ' uncommitted · last ' + (g.last_commit || '-'));
+  }
+  document.getElementById('git-workdir').value = g.workdir || '';
+  document.getElementById('git-user').value = g.user_name || '';
+  document.getElementById('git-email').value = g.user_email || '';
+  if (g.helper) document.getElementById('git-helper').value = g.helper;
+
+  const t = document.getElementById('git-remotes');
+  t.textContent = '';
+  const head = document.createElement('tr');
+  ['Remote', 'URL', ''].forEach(h => { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); });
+  t.appendChild(head);
+  const remotes = g.remotes || [];
+  if (!remotes.length){
+    const tr = document.createElement('tr');
+    const td = document.createElement('td'); td.colSpan = 3; td.className = 'empty';
+    td.textContent = 'No remotes yet.';
+    tr.appendChild(td); t.appendChild(tr);
+  }
+  remotes.forEach(r => {
+    const tr = document.createElement('tr');
+    const a = document.createElement('td'); a.textContent = r.name;
+    const b = document.createElement('td'); b.textContent = r.url; b.className = 'mono';
+    const c = document.createElement('td'); c.className = 'act';
+    const bt = document.createElement('button');
+    bt.className = 'tiny danger'; bt.textContent = 'Remove';
+    bt.title = `herman git ${g.project} rm-remote ${r.name} · type the remote name to confirm.`;
+    bt.onclick = () => removeRemote(r.name);
+    c.appendChild(bt);
+    tr.append(a, b, c); t.appendChild(tr);
+  });
+}
+function table(id, headers, rows, emptyMsg){
+  const t = document.getElementById(id);
+  t.textContent = '';
+  if (!rows.length){
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = headers.length; td.className = 'empty'; td.textContent = emptyMsg;
+    tr.appendChild(td); t.appendChild(tr);
+    return;
+  }
+  const head = document.createElement('tr');
+  headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); });
+  t.appendChild(head);
+  rows.forEach(cells => {
+    const tr = document.createElement('tr');
+    cells.forEach(cell => {
+      const td = document.createElement('td');
+      if (cell && cell.node) { td.appendChild(cell.node); td.className = cell.cls || ''; }
+      else td.textContent = cell === undefined || cell === null ? '' : String(cell);
+      tr.appendChild(td);
+    });
+    t.appendChild(tr);
+  });
+}
+function wrapBtns(list){
+  const d = document.createElement('div');
+  d.className = 'btnrow'; d.style.justifyContent = 'flex-end';
+  list.forEach(b => d.appendChild(b));
+  return {node: d, cls: 'act'};
+}
+function mini(label, fn, cls, tip){
+  const b = document.createElement('button');
+  b.className = 'tiny ' + (cls || '');
+  b.textContent = label;
+  if (tip) b.title = tip;
+  b.onclick = fn;
+  return b;
+}
+function accessView(a){
+  const keyRows = a.api_keys.map(k => [k.name, k.set ? 'set' : 'empty',
+    wrapBtns([mini('Revoke', () => revokeEnv(k.name), 'danger',
+      'herman access unset-env · removes this variable from the project .env (backup kept).')])]);
+  (a.engine_keys || []).forEach(e => keyRows.push([
+    e.name, e.source + ' · ' + e.masked,
+    'engine key · set in ' + e.source]));
+  table('keys-table', ['Variable', 'Value / source', ''],
+    keyRows,
+    'No .env entries for project "' + a.project + '" so far. Keys may come from the shell environment.');
+
+  table('sshkeys-table', ['Key', 'Bits', 'Fingerprint', 'Mode', 'Comment', ''], a.ssh_keys.map(k => {
+    const agentKey = (a.agent || []).find(x => x.fingerprint === k.fingerprint);
+    const inAgent = !!agentKey;
+    const acts = [];
+    if (inAgent) acts.push(mini('Unload', () => gitAction('access-revoke-agent', {}, null, {key: k.path}),
+      '', 'herman access revoke-agent · removes the key from the running agent; the file stays.'));
+    acts.push(mini('Delete', () => revokeKey(k.path, k.name), 'danger',
+      'herman access revoke-key · deletes the key pair; type the file name to confirm.'));
+    return [k.name + (inAgent ? '  [in agent]' : ''), k.bits, k.fingerprint, k.perm,
+            k.comment || (agentKey && agentKey.comment) || '-', wrapBtns(acts)];
+  }), 'No private keys in ~/.ssh on this machine.');
+
+  table('hosts-table', ['Alias', 'HostName', 'User', 'IdentityFile'],
+    (a.hosts || []).map(h => [h.alias, h.hostname || '-', h.user || '-', h.identity || '-']),
+    'No host entries yet · add one with Add SSH access above.');
+
+  table('known-hosts-table', ['Host'],
+    (a.known_hosts_list || []).map(h => [h]),
+    a.known_hosts ? 'Only hashed entries in known_hosts.' : 'Nothing in ~/.ssh/known_hosts yet.');
+
+  table('gitcred-table', ['Host', 'User', 'Scheme', ''], ((a.git && a.git.credentials) || []).map(c => [
+    c.host, c.user, c.scheme,
+    wrapBtns([mini('Forget', () => forgetCred(c.host), 'danger',
+      'herman access gitcred-rm · drops the stored credential; type the host to confirm.')])]),
+    `credential.helper = ${(a.git && a.git.helper) || 'none'} for project "${a.project}", no stored credentials.`);
+
+  table('conn-table', ['Connection'], (a.connections || []).map(c => [c]),
+    'No live SSH connections right now.');
+  accCounts(a);
+}
+
+/* ---------- project cards ---------- */
+/* ---------- usage & insights: read-only analytics from state.db and logs/ ---------- */
+function fmtTok(n){
+  n = Number(n) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+function fmtUsd(v){ return v === null || v === undefined ? 'n/a' : '$' + Number(v).toFixed(2); }
+function hintNode(text){
+  const p = document.createElement('p'); p.className = 'hint'; p.textContent = text; return p;
+}
+function uTiles(target, items){
+  const el = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!el) return;
+  el.textContent = '';
+  items.forEach(it => {
+    const c = document.createElement('div'); c.className = 'utile';
+    const k = document.createElement('div'); k.className = 'k'; k.textContent = it.k;
+    const v = document.createElement('div'); v.className = 'v'; v.textContent = it.v;
+    const d = document.createElement('div'); d.className = 'd'; d.textContent = it.d || '';
+    c.append(k, v, d); el.appendChild(c);
+  });
+}
+function uChart(target, series, key, tip, unit){
+  const el = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!el) return;
+  el.textContent = '';
+  series = series || [];
+  if (!series.length){ el.appendChild(hintNode('No data yet.')); return; }
+  const max = Math.max(1, ...series.map(d => Number(d[key]) || 0));
+  const box = document.createElement('div'); box.className = 'chart';
+  box.setAttribute('role', 'img');
+  box.setAttribute('aria-label', (tip || key) + ': ' + series.map(d => d.day + ' ' + fmtTok(d[key])).join(', '));
+  series.forEach(d => {
+    const v = Number(d[key]) || 0;
+    const col = document.createElement('div'); col.className = 'col';
+    col.title = d.day + ' · ' + fmtTok(v) + ' ' + (unit || 'token') + (d.calls ? ' · ' + d.calls + ' calls' : '');
+    const bar = document.createElement('i');
+    if (!v){ bar.className = 'zero'; bar.style.height = '2px'; }
+    else bar.style.height = Math.max(3, Math.round(100 * v / max)) + '%';
+    col.appendChild(bar); box.appendChild(col);
+  });
+  el.appendChild(box);
+  const x = document.createElement('div'); x.className = 'chart-x';
+  const a = document.createElement('span'); a.textContent = series[0].day;
+  const b = document.createElement('span'); b.textContent = 'peak ' + fmtTok(max) + ' ' + (unit || 'tokens');
+  const c = document.createElement('span'); c.textContent = series[series.length - 1].day;
+  x.append(a, b, c); el.appendChild(x);
+}
+function uBars(target, list){
+  const el = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!el) return;
+  el.textContent = '';
+  if (!list || !list.length){ el.appendChild(hintNode('No data yet.')); return; }
+  list.forEach(m => {
+    const row = document.createElement('div'); row.className = 'ubar';
+    const r1 = document.createElement('div'); r1.className = 'r1';
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m.name;
+    r1.appendChild(nm);
+    if (m.tagTek) r1.appendChild(tag(m.tagTek, m.tagKelas || ''));
+    if (m.sub){ const s = document.createElement('span'); s.className = 'nums'; s.textContent = m.sub; r1.appendChild(s); }
+    const track = document.createElement('div'); track.className = 'track';
+    const fill = document.createElement('i');
+    fill.style.width = Math.max(1, Math.min(100, Number(m.pct) || 0)) + '%';
+    track.appendChild(fill);
+    const nums = document.createElement('div'); nums.className = 'nums'; nums.textContent = m.nums;
+    row.append(r1, track, nums); el.appendChild(row);
+  });
+}
+function usageTilesFrom(t){
+  return [
+    {k: 'Total token', v: fmtTok(t.total), d: fmtTok(t.input) + ' in + ' + fmtTok(t.output) + ' out'},
+    {k: 'Cache read', v: fmtTok(t.cache_read), d: 'prompt cache'},
+    {k: 'Reasoning', v: fmtTok(t.reasoning), d: 'thinking tokens'},
+    {k: 'API calls', v: (t.calls || 0).toLocaleString('en-US'), d: (t.sessions || 0) + ' sessions'},
+    {k: 'Estimated cost', v: fmtUsd(t.est_usd), d: 'models.dev pricing'}
+  ];
+}
+function modelBars(models, limit){
+  const list = (models || []).slice(0, limit || 99);
+  const pool = (models || []).reduce((s, m) => s + (m.total || 0), 0) || 1;
+  return list.map(m => ({
+    name: m.model,
+    tagTek: m.active ? 'active' : null, tagKelas: 'ok',
+    sub: (100 * (m.total || 0) / pool).toFixed(1) + '% of total',
+    pct: 100 * (m.total || 0) / pool,
+    nums: fmtTok(m.total) + ' tok · ' + (m.calls || 0).toLocaleString('en-US') + ' calls · ' + m.sessions + ' sessions · cache '
+          + fmtTok(m.cache_read) + ' · est ' + fmtUsd(m.est_usd) + ' · last ' + (m.last_text || '-')
+  }));
+}
+function renderModelUsage(u){
+  if (!u || u.error){ setHint('usage-project', 'usage unavailable'); return; }
+  const el = document.getElementById('usage-project'); if (el) el.textContent = u.project;
+  uTiles('model-usage-tiles', usageTilesFrom(u.totals).concat([
+    {k: 'Cache ratio', v: (u.cache_ratio || 0) + '%', d: 'cache read vs input'},
+    {k: 'Models used', v: String(u.totals.models || 0), d: 'active: ' + u.active_model}
+  ]));
+  uBars('model-usage-models', modelBars(u.models));
+  uChart('model-usage-chart', u.days, 'total', 'tokens per day');
+  table('model-usage-history', ['Model', 'Sessions', 'Calls', 'Tokens', 'Cache read', 'Last used'],
+    (u.previous_models || []).map(m => [m.model, m.sessions, m.calls, fmtTok(m.total), fmtTok(m.cache_read), m.last_text]),
+    'No other models in this project history yet.');
+}
+function renderUsageAll(u){
+  if (!u || u.error){ setHint('usage-note', 'usage unavailable'); return; }
+  const dup = u.shared_history || [];
+  setHint('usage-note', dup.length
+    ? 'Shared history: ' + dup.map(d => d.a + ' and ' + d.b + ' (' + d.shared_sessions + ' shared sessions)'
+      ).join(', ') + ' · the total is de-duplicated, ' + fmtTok(u.duplicate_total) + ' duplicate tokens are skipped.'
+    : 'Unique total across ' + (u.projects || []).length + ' projects.');
+  uTiles('usage-tiles', usageTilesFrom(u.totals).concat([
+    {k: 'Project', v: String((u.projects || []).length), d: 'with recorded usage'},
+    {k: 'Model', v: String(u.totals.models || 0), d: 'across projects'}
+  ]));
+  uChart('usage-chart', u.days, 'total', 'tokens per day');
+  uBars('usage-models', modelBars(u.models, 4));
+  table('usage-projects', ['Project', 'Sessions', 'Calls', 'Tokens', 'Input', 'Output', 'Cache read'],
+    (u.projects || []).map(x => [x.project, x.sessions, x.calls, fmtTok(x.total), fmtTok(x.input),
+                                 fmtTok(x.output), fmtTok(x.cache_read)]),
+    'No usage recorded yet.');
+}
+async function loadUsage(){
+  const sel = document.getElementById('focus');
+  const nm = focusProject || (sel ? sel.value : '');
+  if (!nm || !document.getElementById('model-usage-tiles')) return;
+  try {
+    renderModelUsage(await (await fetch(`/api/usage?t=${TOKEN}&name=${encodeURIComponent(nm)}`)).json());
+  } catch (e) { setHint('usage-project', 'could not load usage'); }
+}
+async function loadUsageAll(){
+  if (!document.getElementById('usage-tiles')) return;
+  try {
+    renderUsageAll(await (await fetch(`/api/usage-all?t=${TOKEN}`)).json());
+  } catch (e) { setHint('usage-note', 'could not load usage'); }
+}
+function renderInsights(i){
+  if (!i || i.error){ setHint('ctx-note', 'insights unavailable' + (i && i.error ? ': ' + i.error : '')); return; }
+  const act = (i.activity || []).slice().reverse().map(a => ({day: a.day, messages: a.messages, calls: a.tool}));
+  uChart('act-chart', act, 'messages', 'messages per day', 'messages');
+  uChart('act-hours', (i.hours || []).map((n, h) => ({day: String(h).padStart(2, '0'), messages: n})), 'messages',
+    'messages per hour', 'messages');
+  table('act-table', ['Day', 'Messages', 'User', 'Assistant', 'Tool'],
+    (i.activity || []).map(a => [a.day, a.messages, a.user, a.assistant, a.tool]), 'No messages yet.');
+  const tools = i.tools || [];
+  const maxT = Math.max(1, ...tools.map(t => t.n));
+  const pool = tools.reduce((s, t) => s + t.n, 0) || 1;
+  uBars('tools-bars', tools.map(t => ({
+    name: t.tool, sub: (100 * t.n / pool).toFixed(1) + '% of calls', pct: 100 * t.n / maxT,
+    nums: t.n.toLocaleString('en-US') + ' calls · last ' + t.last
+  })));
+  table('tools-table', ['Tool', 'Calls', 'Last used'],
+    tools.map(t => [t.tool, t.n, t.last]), 'No tool usage yet.');
+  table('ctx-table', ['Session', 'Model', 'Messages', 'Calls', 'In', 'Out', 'Cache read', 'Prompt tokens', 'Last active', 'Compression'],
+    (i.context || []).map(c => [c.title || c.id, c.model || '-', c.message_count, c.api_call_count,
+      fmtTok(c.input_tokens), fmtTok(c.output_tokens), fmtTok(c.cache_read_tokens), fmtTok(c.msg_tokens), c.when,
+      (c.compression_ineffective_count || 0) + (c.compression_fallback_streak ? ' · streak ' + c.compression_fallback_streak : '')]),
+    'No sessions yet.');
+  kv('hist-kv', [
+    ['sessions', (i.sessions || 0)],
+    ['messages', Number(i.messages || 0).toLocaleString('en-US')],
+    ['live now', (i.live || []).length ? (i.live || []).join(', ') : 'none'],
+    ['backups', 'written to history-backups/ before every delete'],
+  ]);
+  setHint('hist-note', (i.sessions || 0) + ' sessions and ' + Number(i.messages || 0).toLocaleString('en-US')
+    + ' messages are stored for this project. Deleting is permanent; the backup is the way back.');
+  setHint('ctx-note', (i.sessions || 0) + ' sessions · ' + Number(i.messages || 0).toLocaleString('en-US')
+    + ' messages stored in this project (read read-only).');
+  const e = i.errors || {};
+  const lv = e.levels ? Object.entries(e.levels).map(x => x[0] + ' ' + x[1]).join(' · ') : 'no levels';
+  setHint('err-sum', lv + ' · ' + (e.lines || 0) + ' lines · last ' + (e.last || '-'));
+  table('err-table', ['Level', 'Count', 'Last', 'Message'],
+    (e.top || []).map(t => [t.level, t.n, t.last, t.message]), 'errors.log is clean.');
+}
+async function loadInsights(){
+  const sel = document.getElementById('focus');
+  const nm = focusProject || (sel ? sel.value : '');
+  if (!nm || !document.getElementById('ctx-table')) return;
+  try {
+    renderInsights(await (await fetch(`/api/insights?t=${TOKEN}&name=${encodeURIComponent(nm)}`)).json());
+  } catch (e) { setHint('ctx-note', 'could not load insights'); }
+}
+let msgContext = null;
+function killProjectSessions(name, count){
+  const nm = typeToConfirm('Stop ' + count + ' running session(s) of ' + name + '?'
+    + '\nThe stop is polite: interrupt (same as Ctrl+C), then terminate, then kill only if needed.'
+    + '\nThe transcript up to the last saved turn stays on disk.', name);
+  if (!nm) return;
+  run('kill', nm);
+  setTimeout(() => { if (typeof refreshAll === 'function') refreshAll(); }, 3000);
+}
+function killOneSession(name, sessionId){
+  const nm = typeToConfirm('Stop session ' + sessionId + ' of ' + name + '?'
+    + '\nThe stop is polite: interrupt (same as Ctrl+C), then terminate, then kill only if needed.', name);
+  if (!nm) return;
+  closeProj();
+  run('kill-session', nm, {session: sessionId});
+  setTimeout(() => { if (typeof refreshAll === 'function') refreshAll(); }, 3000);
+}
+function typeToConfirm(what, target){
+  /* Destructive actions follow the house rule: the project name is typed, never just "OK".
+     `target` defaults to the focus project, but a card can act on another project, so callers
+     that know their target pass it explicitly (otherwise typing the right name fails). */
+  const sel = document.getElementById('focus');
+  const nm = target || focusProject || (sel ? sel.value : '');
+  const ans = prompt(what + '\n\nProject: ' + nm
+    + '\nA full database backup is written to history-backups/ before anything is removed.'
+    + '\nType the project name to confirm:');
+  if (ans === null) { setStatus('warn', 'Cancelled.'); return null; }
+  if (ans.trim() !== nm){
+    setStatus('error', 'Name did not match: nothing changed.');
+    return null;
+  }
+  return nm;
+}
+function deleteThisMessage(){
+  const m = msgContext && msgContext.msg;
+  if (!m) return;
+  const nm = typeToConfirm('Delete message #' + m.id + ' (' + m.role
+    + (m.tool_name ? ' · ' + m.tool_name : '') + ')?', msgContext.project);
+  if (!nm) return;
+  closeMsg();
+  run('history-delete-message', nm, {id: m.id});
+  setTimeout(() => { if (typeof doSearch === 'function') doSearch(); }, 2500);
+}
+function deleteThisSession(){
+  const s = msgContext && msgContext.session;
+  if (!s || !s.id) return;
+  const nm = typeToConfirm('Delete the whole session "' + (s.title || s.id) + '"?', msgContext.project);
+  if (!nm) return;
+  closeMsg();
+  run('history-delete-session', nm, {session: s.id});
+  setTimeout(() => { if (typeof doSearch === 'function') doSearch(); }, 2500);
+}
+function deleteMatching(){
+  const q = (document.getElementById('hist-query').value || '').trim();
+  if (!q){ setStatus('error', 'Type a search first, or use Delete all history.'); return; }
+  const nm = typeToConfirm('Delete every session whose messages match "' + q + '"?');
+  if (!nm) return;
+  run('history-delete-matching', nm, {q});
+}
+function deleteAllHistory(){
+  const nm = typeToConfirm('Delete ALL stored history of this project?');
+  if (!nm) return;
+  run('history-delete-all', nm);
+}
+async function openMessage(msgId){
+  if (!msgId) return;
+  const sel = document.getElementById('focus');
+  const nm = focusProject || (sel ? sel.value : '');
+  setStatus('busy', 'Loading message…');
+  try {
+    const d = await (await fetch(`/api/message?t=${TOKEN}&name=${encodeURIComponent(nm)}&id=${msgId}`)).json();
+    if (d.error){ setStatus('error', d.error); return; }
+    msgContext = {project: nm, session: d.session || {}, msg: d.msg};
+    const m = d.msg;
+    document.getElementById('msg-head').textContent =
+      (m.role || 'message') + (m.tool_name ? ' · ' + m.tool_name : '') + '  #' + m.id;
+    document.getElementById('msg-meta').textContent = m.when + ' · ' + m.chars + ' chars'
+      + (m.tokens ? ' · ' + m.tokens + ' tokens' : '')
+      + (m.truncated ? ' · showing the first 20000 (message is longer)' : '')
+      + (m.finish_reason ? ' · finish: ' + m.finish_reason : '');
+    const s = d.session || {};
+    kv('msg-session', [
+      ['session', (s.title || s.id || '-') + (s.id ? '  (' + s.id + ')' : '')],
+      ['model', s.model || '-'],
+      ['session size', (s.messages !== undefined ? s.messages + ' messages' : '-')
+        + (s.calls ? ' · ' + s.calls + ' calls' : '')],
+    ]);
+    document.getElementById('msg-body').textContent = m.content || '(empty)';
+    const draw = (target, list, empty) => {
+      const box = document.getElementById(target);
+      box.textContent = '';
+      if (!list || !list.length){ box.appendChild(hintNode(empty)); return; }
+      list.forEach(x => {
+        const el = document.createElement('div'); el.className = 'msg';
+        const top = document.createElement('div'); top.className = 'top';
+        const a = document.createElement('span'); a.textContent = x.when;
+        const b = document.createElement('span'); b.textContent = x.role + (x.tool_name ? ' · ' + x.tool_name : '');
+        const c = document.createElement('span'); c.textContent = '#' + x.id;
+        top.append(a, b, c);
+        const txt = document.createElement('div'); txt.className = 'txt';
+        txt.textContent = x.preview || '(empty)';
+        txt.title = x.preview || '';
+        el.append(top, txt); box.appendChild(el);
+      });
+    };
+    draw('msg-before', d.before, 'Nothing earlier in this session.');
+    draw('msg-after', d.after, 'Nothing after this message in the session.');
+    const link = document.getElementById('msg-session-link');
+    if (link) link.disabled = !(s.id);
+    openModal('msg-modal');
+    setStatus('ok', 'Message loaded.');
+  } catch (e) { setStatus('error', 'Could not load that message.'); }
+}
+function closeMsg(){ closeModal('msg-modal'); }
+function copyMsg(){
+  const body = document.getElementById('msg-body').textContent || '';
+  const head = (msgContext && msgContext.msg
+    ? msgContext.msg.role + ' · ' + msgContext.msg.when + ' · ' + msgContext.msg.session_id + '\n\n' : '');
+  navigator.clipboard.writeText(head + body)
+    .then(() => setStatus('ok', 'Message copied.'))
+    .catch(() => setStatus('error', 'Clipboard blocked by the browser.'));
+}
+function gotoSession(){
+  const sid = msgContext && msgContext.session && msgContext.session.id;
+  if (!sid) return;
+  closeMsg();
+  say('session ' + sid + ' · open the Hermes dashboard to read the full session.');
+  location.hash = '#/insights';
+}
+
+async function doSearch(){
+  const box = document.getElementById('search-hits');
+  const q = (document.getElementById('search-q').value || '').trim();
+  if (!box) return;
+  box.textContent = '';
+  if (!q){ setHint('search-note', 'Type a keyword first.'); return; }
+  const sel = document.getElementById('focus');
+  const nm = focusProject || (sel ? sel.value : '');
+  setHint('search-note', 'searching "' + q + '" in ' + (nm || '?') + '…');
+  try {
+    const d = await (await fetch(`/api/search?t=${TOKEN}&name=${encodeURIComponent(nm)}&q=${encodeURIComponent(q)}`)).json();
+    setHint('search-note', Number(d.total || 0).toLocaleString('en-US') + ' matches · showing '
+      + (d.hits || []).length + ' newest (mode ' + (d.mode || '-') + ')');
+    (d.hits || []).forEach(h => {
+      const el = document.createElement('div'); el.className = 'hit clickable';
+      el.tabIndex = 0; el.setAttribute('role', 'button');
+      el.title = 'Open this message in full, with the lines around it.';
+      el.onclick = () => openMessage(h.msg_id);
+      el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openMessage(h.msg_id); } };
+      const top = document.createElement('div'); top.className = 'top';
+      const a = document.createElement('span'); a.textContent = h.when;
+      const b = document.createElement('span'); b.textContent = h.role + (h.tool_name ? ' · ' + h.tool_name : '');
+      const c = document.createElement('span'); c.textContent = h.title || h.session_id || '';
+      const o = document.createElement('span'); o.className = 'open'; o.textContent = 'open ›';
+      top.append(a, b, c, o);
+      const txt = document.createElement('div'); txt.className = 'txt';
+      String(h.snippet || '').split(/(\[[^\]]*\])/).forEach(part => {
+        if (part.length > 2 && part.startsWith('[') && part.endsWith(']')){
+          const mk = document.createElement('mark'); mk.textContent = part.slice(1, -1); txt.appendChild(mk);
+        } else if (part) txt.appendChild(document.createTextNode(part));
+      });
+      el.append(top, txt); box.appendChild(el);
+    });
+  } catch (e) { setHint('search-note', 'could not load search results'); }
+}
+
+function grid(list){
+  const g = document.getElementById('grid');
+  g.textContent = '';
+  list.forEach(p => g.appendChild(card(p)));
+}
+function card(p){
+  const el = document.createElement('div');
+  el.className = 'card proj' + (p.active ? ' active' : '')
+    + (p.name === DEFAULT_PROJECT ? ' default' : '');
+  const head = document.createElement('div');
+  head.className = 'proj-head';
+  const h = document.createElement('h3'); h.textContent = p.name; head.appendChild(h);
+  if (p.active) head.appendChild(tag('active', 'ok'));
+  head.appendChild(tag('gateway ' + p.gateway, p.gateway === 'up' ? 'ok' : 'warn'));
+  const liveNow = p.sessions || [];
+  if (liveNow.length){
+    const run = document.createElement('span');
+    run.className = 'proj-run';
+    run.textContent = 'session: ' + liveNow.length;
+    run.title = 'A session is running here · ' + sessTip(liveNow);
+    const kill = document.createElement('button');
+    kill.className = 'sess-kill';
+    kill.textContent = '-';
+    kill.title = 'herman kill ' + p.name + ' · stop ' + liveNow.length
+      + ' running session(s) for this project (Ctrl+C style: interrupt, then terminate, then kill). Asks first.';
+    kill.setAttribute('aria-label', 'Stop the running sessions of ' + p.name);
+    kill.onclick = ev => { ev.stopPropagation(); killProjectSessions(p.name, liveNow.length); };
+    const wrap = document.createElement('span');
+    wrap.className = 'sess-mark';
+    wrap.append(run, kill);
+    head.appendChild(wrap);
+  }
+  el.appendChild(head);
+
+  const home = document.createElement('div');
+  home.className = 'proj-home';
+  const hk = document.createElement('span');
+  hk.className = 'k';
+  hk.textContent = 'home';
+  const hv = document.createElement('span');
+  hv.className = 'v';
+  hv.textContent = shortHome(p.home);
+  hv.title = p.home || '';
+  home.append(hk, hv);
+  el.appendChild(home);
+
+  const row = document.createElement('div');
+  row.className = 'proj-actions';
+  row.append(
+    big('Enter session', () => openTerminal(p.name), 'primary',
+        'Opens a terminal window running this project (herman -u <project>).'),
+    big('Details', () => openProj(p.name), '',
+        'Model, workdir, skills, memory, session and the remaining project commands.')
+  );
+  el.appendChild(row);
+  return el;
+}
+
+/* ---------- live session display (card + modal) ---------- */
+function sessTip(live){
+  return live.map(s => s.id + ' (' + s.surface + ', pid ' + s.pid + ', up ' + fmtUp(s.age_s) + ')').join(', ');
+}
+function shortHome(path){
+  /* ~/… keeps every card's path on one line; the full path stays in the title. */
+  const p = String(path || '');
+  const m = p.match(/^\/(?:home|Users)\/[^/]+/);
+  return m ? '~' + p.slice(m[0].length) : p;
+}
+function sessionBox(projectName, live, withProject){
+  /* One session reads as a single sentence; several become a short labelled list so ten of
+     them stay readable instead of one very long line. */
+  const box = document.createElement('div');
+  if (!live.length) return box;
+  const head = document.createElement('div');
+  head.className = 'sess-head';
+  const who = withProject ? projectName + ' ' : '';
+  if (live.length === 1){
+    head.textContent = 'Session running now: ' + who + live[0].id;
+    box.appendChild(head);
+  } else {
+    head.textContent = 'Session running now: ' + who + live.length + ' sessions';
+    box.appendChild(head);
+    live.forEach(s => {
+      const d = document.createElement('div');
+      d.className = 'sess-line';
+      const txt = document.createElement('span');
+      txt.textContent = '• ' + s.id + '  ·  ' + s.surface + '  ·  pid ' + s.pid + '  ·  up ' + fmtUp(s.age_s);
+      const kill = document.createElement('button');
+      kill.className = 'sess-kill';
+      kill.textContent = '-';
+      kill.title = 'herman kill ' + projectName + ' --session ' + s.id
+        + ' · stop this one session (Ctrl+C style, asks first).';
+      kill.setAttribute('aria-label', 'Stop session ' + s.id);
+      kill.onclick = () => killOneSession(projectName, s.id);
+      d.append(txt, kill);
+      d.title = s.id + ' (' + s.surface + ', pid ' + s.pid + ')';
+      box.appendChild(d);
+    });
+  }
+  box.title = sessTip(live);
+  return box;
+}
+
+/* ---------- enter session while another project runs ---------- */
+let otherTarget = '', otherNames = [];
+function showOtherSessions(target, others){
+  otherTarget = target;
+  otherNames = others.map(p => p.name);
+  const lines = others.map(p => p.sessions.map(s =>
+    p.name + '  ·  ' + s.id + '  ·  ' + s.surface + '  ·  pid ' + s.pid + '  ·  up ' + fmtUp(s.age_s)));
+  document.getElementById('other-title').textContent =
+    'Session running in ' + others.map(p => p.name).join(', ');
+  const box = document.getElementById('other-list');
+  box.textContent = '';
+  lines.flat().forEach(txt => {
+    const d = document.createElement('div');
+    d.className = 'mono';
+    d.textContent = txt;
+    box.appendChild(d);
+  });
+  document.getElementById('other-sub').textContent =
+    'Starting a session in "' + target + '" is fine, but those processes keep running (its project memory,'
+    + ' the state database and the terminal stay busy). Close them here or continue anyway.';
+  openModal('other-modal');
+}
+function closeOther(){ closeModal('other-modal'); }
+function otherContinue(){
+  const t = otherTarget;
+  closeOther();
+  openTerminalNow(t);
+}
+async function otherCloseAndContinue(){
+  const t = otherTarget, names = otherNames.slice();
+  closeOther();
+  for (const nm of names){
+    try{
+      const d = await (await fetch('/api/close-sessions?t=' + TOKEN, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: nm, confirm: nm})
+      })).json();
+      if (d.ok){ say('✓ closed ' + d.count + ' session(s) in ' + nm); }
+      else { say('✗ ' + nm + ': ' + (d.error || 'could not close')); }
+    }catch(e){ say('✗ ' + nm + ': ' + e); }
+  }
+  await openTerminalNow(t);
+}
+
+/* ---------- project details modal ---------- */
+async function openProj(name){
+  let p = (projects || []).find(x => x.name === name);
+  if (!p){                                   // stale tab: pull the list once from the server
+    try{
+      const d = await (await fetch(`/api/projects?t=${TOKEN}`)).json();
+      projects = d.projects || [];
+      p = projects.find(x => x.name === name);
+    }catch(e){ /* let the message below speak for itself */ }
+  }
+  if (!p){
+    say('✗ project "' + name + '" is not in the current list');
+    setStatus('error', 'Project "' + name + '" is not in the current list · press Refresh.');
+    return;
+  }
+  const live = p.sessions || [];
+  document.getElementById('proj-title').textContent = p.name + (p.active ? '  (active)' : '');
+  const live_box = document.getElementById('proj-live-box');
+  live_box.textContent = '';
+  if (live.length){
+    const box = sessionBox(p.name, live, false);      // the project name is already in the title
+    while (box.firstChild) live_box.appendChild(box.firstChild);
+  } else {
+    const none = document.createElement('div');
+    none.className = 'sess-head';
+    none.textContent = 'No session running in this project.';
+    live_box.appendChild(none);
+  }
+  const meta = document.getElementById('proj-meta');
+  meta.textContent = '';
+  [['status', 'gateway ' + p.gateway], ['model', p.model], ['workdir', p.cwd],
+   ['skills', p.skills + ' installed'], ['memory', fmtSize(p.memory_bytes)],
+   ['used', fmtTime(p.last_used)], ['home', shortHome(p.home)]]
+    .forEach(([k, val]) => {
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.textContent = val;
+      dd.title = k === 'home' ? (p.home || val) : val;
+      meta.append(dt, dd);
+    });
+  document.getElementById('proj-focus').onclick =
+    () => { const sel = document.getElementById('focus');
+            if (sel) { sel.value = p.name; focusProject = p.name; }
+            closeProj(); loadFocus(); navigate('model'); activateProject(p.name); };
+  document.getElementById('proj-log').onclick = () => { closeProj(); run('logs', p.name); };
+  document.getElementById('proj-doctor').onclick = () => { closeProj(); run('doctor', p.name); };
+  document.getElementById('proj-backup').onclick = () => { closeProj(); run('backup', p.name); };
+  document.getElementById('proj-delete').onclick = () => { closeProj(); removeProject(p.name); };
+  openModal('proj-modal');
+}
+const SRC_KEY = 'herman.sources.v1';
+function dismissSources(){
+  try { localStorage.setItem(SRC_KEY, '1'); } catch (e) { /* private mode: show it again next time */ }
+  closeModal('src-modal');
+}
+function showSources(){
+  openModal('src-modal');
+}
+/* Shown once per browser, the first time a board appears whose numbers mix local data with an
+   external endpoint (Model and Insights). Afterwards the source lines on those boards carry it. */
+function maybeSources(route){
+  if (route !== 'model' && route !== 'insights') return;
+  try { if (localStorage.getItem(SRC_KEY) === '1') return; } catch (e) { /* fall through */ }
+  setTimeout(showSources, 400);
+}
+function openModal(id){
+  document.getElementById(id).hidden = false;
+  const first = document.querySelector('#' + id + ' .modal-actions button');
+  if (first) first.focus();
+}
+function closeModal(id){ document.getElementById(id).hidden = true; }
+function closeProj(){ closeModal('proj-modal'); }
+function tag(text, cls){
+  const b = document.createElement('span');
+  b.className = 'tag ' + (cls || '');
+  b.textContent = text;
+  return b;
+}
+function big(label, fn, cls, tip){
+  const b = document.createElement('button');
+  b.textContent = label;
+  if (cls) b.className = cls;
+  if (tip) b.title = tip;
+  b.onclick = fn;
+  return b;
+}
+
+/* ---------- actions ---------- */
+const LABELS = {
+  sync: 'Syncing with the installed Hermes…',
+  kill: 'Stopping sessions…', 'kill-session': 'Stopping session…',
+  'history-stats': 'Reading history…', 'history-delete-message': 'Deleting message…',
+  'history-delete-session': 'Deleting session…', 'history-delete-matching': 'Deleting matching sessions…',
+  'history-delete-all': 'Deleting project history…',
+  info: 'Reading project info…', backup: 'Backing up project…', 'backup-all': 'Backing up all projects…',
+  tidy: 'Tidying project…', 'tidy-all': 'Tidying all projects…', usage: 'Collecting usage…',
+  logs: 'Reading log…', audit: 'Auditing memory and skills…', doctor: 'Running health check…',
+  'doctor-all': 'Checking every project…', remove: 'Deleting project…', create: 'Creating project…',
+  list: 'Listing projects…', 'model-set': 'Updating model…', git: 'Reading git status…',
+  'git-init': 'Initialising repository…', 'git-set-user': 'Saving git identity…',
+  'git-set-remote': 'Saving remote…', 'git-rm-remote': 'Removing remote…',
+  'git-set-helper': 'Saving credential helper…', 'git-set-workdir': 'Saving workdir…',
+  'access-set-env': 'Saving API key…', 'access-gitcred-add': 'Storing git credential…',
+  'access-gitcred-rm': 'Forgetting credential…',
+  'access-revoke-agent': 'Unloading key from agent…', 'access-revoke-key': 'Deleting key…',
+  'access-revoke-host': 'Removing host…', 'access-unset-env': 'Revoking API key…',
+  'access-new-key': 'Creating SSH key…',
+};
+function syncNow(){
+  /* The header Refresh button is herman's sync: it re-checks the engine behind the panel, repairs
+     the harmless drift and reports what held / changed / went stale in the output panel. */
+  run('sync', '');
+}
+const MUTATING_ACTIONS = new Set([
+  /* mirrors the panel's POST-only list: a state change must never ride on a GET, so a prefetch,
+     a link or an <img> tag cannot delete, stop or reconfigure anything. */
+  'create', 'remove', 'backup', 'backup-all', 'tidy', 'tidy-all', 'sync', 'kill', 'kill-session',
+  'history-delete-message', 'history-delete-session', 'history-delete-matching', 'history-delete-all',
+  'cwd', 'git-init', 'git-set-workdir', 'git-set-user', 'git-set-remote', 'git-rm-remote',
+  'git-set-helper', 'access-set-env', 'access-unset-env', 'access-new-key', 'access-revoke-key',
+  'access-add-agent', 'access-revoke-agent', 'access-gitcred-add', 'access-gitcred-rm',
+]);
+async function run(action, name, extra){
+  /* State-changing actions are POSTed, read-only ones are fetched with GET; both answer the same
+     SSE frames, parsed by hand here so the token can also travel in a header instead of the URL. */
+  if (src) { src.close(); src = null; }
+  lastAction = action;
+  resetOut('$ herman ' + action + (name ? ' ' + name : ''));
+  startTimer(LABELS[action] || 'Working…');
+  const q = new URLSearchParams(Object.assign({t: TOKEN, action, name}, extra || {}));
+  const method = MUTATING_ACTIONS.has(action) ? 'POST' : 'GET';
+  try {
+    const res = await fetch('/api/action?' + q.toString(),
+                            {method: method, headers: {'X-Herman-Token': TOKEN}});
+    if (!res.ok || !res.body){
+      const err = await res.json().catch(() => ({error: res.status + ' ' + res.statusText}));
+      clearInterval(timer);
+      say('✗ ' + (err.error || 'request failed'));
+      setStatus('error', err.error || 'request failed');
+      return;
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;){
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0){
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        for (const line of chunk.split('\n')){
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const d = JSON.parse(line.slice(6));
+            if (d.line !== undefined && !d.line.startsWith('$ herman') && d.line.trim()) say(d.line);
+          } catch (e) { /* keepalive */ }
+        }
+      }
+    }
+    finishStream();
+  } catch (e) {
+    clearInterval(timer);
+    say('✗ ' + e);
+    setStatus('error', 'Stream stopped unexpectedly.');
+  }
+}
+async function runPost(action, name, body){
+  lastAction = action;
+  resetOut('$ herman ' + action + (name ? ' ' + name : ''));
+  startTimer(LABELS[action] || 'Working…');
+  try {
+    const res = await fetch(`/api/action?t=${TOKEN}&action=${encodeURIComponent(action)}&name=${encodeURIComponent(name || '')}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})
+    });
+    if (!res.body){
+      const err = await res.json().catch(() => ({error: 'request failed'}));
+      say('✗ ' + (err.error || 'request failed'));
+      clearInterval(timer);
+      setStatus('error', err.error || 'request failed');
+      return;
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;){
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0){
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        for (const line of chunk.split('\n')){
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const d = JSON.parse(line.slice(6));
+            if (d.line !== undefined && !d.line.startsWith('$ herman') && d.line.trim()) say(d.line);
+          } catch (e) { /* keepalive */ }
+        }
+      }
+    }
+    finishStream();
+  } catch (e) {
+    clearInterval(timer);
+    say('✗ ' + e);
+    setStatus('error', 'Request failed.');
+  }
+}
+
+/* ---------- ssh access (username + hostname only) ---------- */
+let pwTarget = {user: '', host: ''};
+function sshGrant(){
+  const user = v('ssh-user').trim(), host = v('ssh-host').trim();
+  if (!user || !host){ setStatus('error', 'Username and hostname are both required.'); return; }
+  grantPost(user, host, '');
+}
+async function grantPost(user, host, password){
+  resetOut('$ herman access grant ' + user + '@' + host);
+  startTimer(password ? 'Installing the public key…' : 'Checking ' + host + '…');
+  try{
+    const res = await fetch(`/api/access-grant?t=${TOKEN}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user: user, host: host, password: password || ''})
+    });
+    const d = await res.json();
+    (d.steps || []).forEach(s => say('· ' + s));
+    clearInterval(timer);
+    if (d.state === 'need_password'){
+      setStatus('warn', host + ' asks for a password.');
+      askPassword(user, host, d.msg);
+      return;
+    }
+    if (d.ok){ say('✓ ' + d.msg); setStatus('done', 'SSH access ready: ' + user + '@' + host); refreshAll(); return; }
+    say('✗ ' + (d.msg || 'failed')); setStatus('error', d.msg || 'failed');
+  }catch(e){ clearInterval(timer); say('✗ ' + e); setStatus('error', 'Request failed.'); }
+}
+function askPassword(user, host, why){
+  pwTarget = {user: user, host: host};
+  document.getElementById('pw-title').textContent = 'Password for ' + user + '@' + host;
+  document.getElementById('pw-sub').textContent = (why ? why + ' · ' : '')
+    + 'Sent to ssh-copy-id once, then forgotten.';
+  const inp = document.getElementById('pw-input');
+  inp.value = ''; inp.type = 'password';
+  const eye = document.getElementById('pw-eye');
+  eye.textContent = 'Show'; eye.setAttribute('aria-pressed', 'false');
+  document.getElementById('pw-modal').hidden = false;
+  inp.focus();
+}
+function togglePw(){
+  const inp = document.getElementById('pw-input');
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  const b = document.getElementById('pw-eye');
+  b.textContent = show ? 'Hide' : 'Show';
+  b.setAttribute('aria-pressed', show ? 'true' : 'false');
+  inp.focus();
+}
+function closePw(){
+  document.getElementById('pw-modal').hidden = true;
+  document.getElementById('pw-input').value = '';
+  setStatus('warn', 'Cancelled · no key installed.');
+}
+function submitPw(){
+  if (!pwTarget.user){ closePw(); return; }
+  const pw = document.getElementById('pw-input').value;
+  document.getElementById('pw-modal').hidden = true;
+  document.getElementById('pw-input').value = '';
+  if (!pw){ setStatus('error', 'Empty password · nothing sent.'); return; }
+  grantPost(pwTarget.user, pwTarget.host, pw);
+}
+document.addEventListener('keydown', e => {
+  const modal = ['pw-modal', 'proj-modal', 'other-modal', 'src-modal', 'create-modal', 'msg-modal']
+    .find(id => !document.getElementById(id).hidden);
+  if (!modal) return;
+  if (e.key === 'Escape'){
+    if (modal === 'pw-modal') closePw();
+    else if (modal === 'proj-modal') closeProj();
+    else if (modal === 'src-modal') dismissSources();
+    else if (modal === 'create-modal') closeCreateModal();
+    else if (modal === 'msg-modal') closeMsg();
+    else closeOther();
+  }
+  if (modal === 'create-modal' && e.key === 'Enter'){
+    const a = document.activeElement;
+    if (a && a.id === 'newname-m') createProjectDialog();
+  }
+  if (modal === 'pw-modal' && e.key === 'Enter'){
+    const a = document.activeElement; if (a && a.id === 'pw-input') submitPw();
+  }
+});
+/* Modals stay open until Escape or their own Close/Cancel button: a stray click on the
+   backdrop must never discard what is on screen (a typed password, a half-read card). */
+
+/* ---------- action helpers ---------- */
+/* One implementation for both entry points: the framed form on the Projects board and the dialog
+   opened from the header. Keep the ids distinct or getElementById picks the wrong field. */
+function createProjectFrom(nameId, modeId){
+  const field = document.getElementById(nameId);
+  const name = (field && field.value || '').trim().toLowerCase();
+  if (!name){ setStatus('error', 'Enter a project name first.'); return false; }
+  const mode = document.getElementById(modeId).value;
+  const extra = mode === 'clean' ? {'--no-skills': 1} : (mode === 'clone' ? {'--clone': 1} : {'--clone-all': 1});
+  field.value = '';
+  run('create', name, extra);
+  return true;
+}
+function createProject(){ createProjectFrom('newname', 'newmode'); }
+function openCreateModal(){
+  openModal('create-modal');
+  const f = document.getElementById('newname-m');
+  if (f) f.focus();
+}
+function closeCreateModal(){ closeModal('create-modal'); }
+function createProjectDialog(){
+  if (createProjectFrom('newname-m', 'newmode-m')) closeCreateModal();
+}
+function removeProject(name){
+  if (!name){ setStatus('error', 'Pick a focus project first.'); return; }
+  const ans = prompt(`Delete project "${name}"\n\nThis removes its profile, memory, skills and sessions permanently.\nType the project name to confirm:`);
+  if (ans !== name){ setStatus('warn', 'Delete cancelled.'); return; }
+  run('remove', name);
+}
+function setModel(){
+  const model = v('model-name');
+  if (!model){ setStatus('error', 'Pick a model from the list first.'); return; }
+  if (!model){ setStatus('error', 'Enter a model id first.'); return; }
+  const prov = v('model-provider');
+  const extra = {model: model};
+  if (prov && prov !== modelProvider) extra.provider = prov;   // provider stays untouched otherwise
+  run('model-set', focusProject, extra);
+}
+function gitAction(action, body, fieldId, extra){
+  runPost(action, focusProject, Object.assign({}, body || {}, extra || {}));
+  if (fieldId) document.getElementById(fieldId).value = '';
+}
+function removeRemote(name){
+  const ans = prompt(`Remove remote "${name}" from this repository?\nType the remote name to confirm:`);
+  if (ans !== name){ setStatus('warn', 'Remove cancelled.'); return; }
+  runPost('git-rm-remote', focusProject, {remote_name: name, confirm: name});
+}
+function saveEnv(){
+  const name = v('env-var'), value = v('env-value');
+  if (!name || !value){ setStatus('error', 'Variable name and value are both required.'); return; }
+  runPost('access-set-env', focusProject, {var: name, value: value});
+  document.getElementById('env-value').value = '';
+}
+function revokeEnv(name){
+  const ans = prompt(`Revoke API key\n\nRemove ${name} from this project's .env?\nType the variable name to confirm:`);
+  if (ans !== name){ setStatus('warn', 'Revoke cancelled.'); return; }
+  runPost('access-unset-env', focusProject, {var: name, confirm: name});
+}
+function newKey(){
+  const label = v('newkey-label');
+  if (!label){ setStatus('error', 'Enter a key label first.'); return; }
+  const ans = prompt(`Create SSH key\n\nNew ed25519 key id_ed25519_${label} (no passphrase); the public key will be printed.\nType the label to confirm:`);
+  if (ans !== label){ setStatus('warn', 'Create cancelled.'); return; }
+  runPost('access-new-key', focusProject, {label: label, confirm: label});
+}
+function revokeKey(path, name){
+  const ans = prompt(`Delete SSH key\n\n${name} and its .pub file will be deleted permanently.\nType the file name to confirm:`);
+  if (ans !== name){ setStatus('warn', 'Delete cancelled.'); return; }
+  runPost('access-revoke-key', focusProject, {key: path, confirm: name});
+}
+function saveCred(){
+  const host = v('cred-host'), user = v('cred-user'), token = v('cred-token');
+  if (!host || !user || !token){ setStatus('error', 'Host, user and token are all required.'); return; }
+  runPost('access-gitcred-add', focusProject, {host: host, user: user, token: token});
+  document.getElementById('cred-token').value = '';
+}
+function forgetCred(host){
+  const ans = prompt(`Forget stored git credential for ${host}?\nType the host to confirm:`);
+  if (ans !== host){ setStatus('warn', 'Forget cancelled.'); return; }
+  runPost('access-gitcred-rm', focusProject, {host: host, confirm: host});
+}
+async function openTerminal(name){
+  /* Entering project B while project A still runs: ask first, and offer to close A. */
+  const others = (projects || []).filter(p => p.name !== name && (p.sessions || []).length);
+  if (others.length){ showOtherSessions(name, others); return; }
+  await openTerminalNow(name);
+}
+async function openTerminalNow(name){
+  setStatus('running', 'Opening a terminal for ' + name + '…');
+  try {
+    const d = await (await fetch(`/api/open-terminal?t=${TOKEN}&name=${encodeURIComponent(name)}`)).json();
+    setStatus(d.ok ? 'done' : 'error', d.msg || (d.ok ? 'Session opened.' : 'Could not open a terminal.'));
+    if (d.ok) say('✓ ' + d.msg);
+  } catch (e){ setStatus('error', 'Request failed: ' + e); }
+}
+async function openDashboard(){
+  const b = document.getElementById('open-dash');
+  b.disabled = true;
+  setStatus('running', 'Starting the Hermes dashboard…');
+  resetOut('Running `hermes dashboard` in the background…');
+  try {
+    const d = await (await fetch(`/api/open-dashboard?t=${TOKEN}`)).json();
+    if (d.ok){
+      say('✓ ' + d.msg);
+      say('  opening ' + d.url);
+      setStatus('done', d.already ? 'Dashboard already running.' : 'Dashboard started.');
+      window.open(d.url, '_blank');
+    } else {
+      say('✗ ' + d.msg);
+      setStatus('error', d.msg);
+    }
+  } catch (e) { say('✗ ' + e); setStatus('error', 'Request failed.'); }
+  finally { b.disabled = false; refresh(); }
+}
+
+/* ---------- formatting ---------- */
+function fmtSize(n){
+  const u = ['B','KB','MB','GB']; let val = n, i = 0;
+  while (val >= 1024 && i < u.length - 1){ val /= 1024; i++; }
+  return i === 0 ? val + ' B' : val.toFixed(1) + ' ' + u[i];
+}
+function fmtTime(ts){
+  if (!ts) return 'never';
+  const d = (Date.now()/1000 - ts);
+  if (d < 60) return 'just now';
+  if (d < 3600) return Math.floor(d/60) + ' min ago';
+  if (d < 86400) return Math.floor(d/3600) + ' h ago';
+  if (d < 86400*30) return Math.floor(d/86400) + ' d ago';
+  return new Date(ts*1000).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+}
+
+(function initDockResize(){
+  const dock = document.getElementById('dock');
+  const grip = document.getElementById('dock-grip');
+  const outEl = document.getElementById('out');
+  const saved = parseFloat(localStorage.getItem('herman.dock') || '0');
+  if (saved > 120) dock.style.setProperty('--dock-h', saved + 'px');
+  let dragging = false, startY = 0, startH = 0;
+  grip.addEventListener('mousedown', e => {
+    dragging = true; startY = e.clientY; startH = outEl.getBoundingClientRect().height;
+    document.body.style.userSelect = 'none'; e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const h = Math.max(120, Math.min(window.innerHeight * 0.62, startH + (startY - e.clientY)));
+    dock.style.setProperty('--dock-h', h + 'px');
+    syncDockPad();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false; document.body.style.userSelect = '';
+    localStorage.setItem('herman.dock', String(Math.round(outEl.getBoundingClientRect().height)));
+  });
+  grip.addEventListener('dblclick', () => {
+    dock.style.removeProperty('--dock-h'); localStorage.removeItem('herman.dock');
+    syncDockPad();
+  });
+})();
+
+function runFocus(action, extra){ run(action, focusProject, extra); }
+function removeFocus(){ removeProject(focusProject); }
+function vtab(view, key){
+  const root = document.getElementById('view-' + view);
+  if (!root) return;
+  const panes = [...root.querySelectorAll('.subpane')];
+  if (!panes.length) return;
+  const known = panes.some(p => p.dataset.sub === key) ? key : panes[0].dataset.sub;
+  localStorage.setItem('herman.vt.' + view, known);
+  root.querySelectorAll('[data-sub]').forEach(el => {
+    const on = el.dataset.sub === known;
+    if (el.classList.contains('subtab')) el.classList.toggle('active', on);
+    if (el.classList.contains('subpane')) el.classList.toggle('on', on);
+  });
+  if (!panes.some(p => p.classList.contains('on'))) panes[0].classList.add('on');
+}
+function vtabRestore(view){
+  vtab(view, localStorage.getItem('herman.vt.' + view) || '');
+}
+function accessTab(key){ vtab('access', key); }
+function accCounts(a){
+  const set = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+  set('acc-count-keys', (a.api_keys || []).length);
+  set('acc-count-sshkeys', (a.ssh_keys || []).length);
+  set('acc-count-gitcred', ((a.git && a.git.credentials) || []).length);
+  set('acc-count-conn', (a.connections || []).length);
+}
+
+function tickClock(){
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const c = document.getElementById('clock');
+  const dt = document.getElementById('clock-date');
+  if (c) c.textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  if (dt) {
+    const wd = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+    dt.textContent = wd + ', ' + p(d.getDate()) + ' ' + mo + ' ' + d.getFullYear();
+  }
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+/* ---------- theme ---------- */
+let liveSig = '';
+function currentTheme(){ return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'; }
+function applyTheme(t, store){
+  document.documentElement.dataset.theme = t;
+  if (store) { try { localStorage.setItem('herman.theme', t); } catch(e){} }
+  const b = document.getElementById('theme-toggle');
+  if (!b) return;
+  const dark = t === 'dark';
+  b.setAttribute('aria-checked', dark ? 'true' : 'false');
+  b.setAttribute('aria-label', dark ? 'Dark theme' : 'Light theme');
+  b.title = 'Theme: ' + t + ' · click to switch to ' + (dark ? 'light' : 'dark') +
+            ' (saved in this browser).';
+}
+function toggleTheme(){ applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true); }
+applyTheme(currentTheme(), false);
+
+function syncHeadH(){
+  const h = document.querySelector('.topbar');
+  if (h) document.documentElement.style.setProperty('--head-h', h.offsetHeight + 'px');
+}
+window.addEventListener('resize', syncHeadH);
+syncHeadH();
+
+document.querySelectorAll('.navlink').forEach(b => b.onclick = () => navigate(b.dataset.route));
+setInterval(pollLive, 10000);
+const sq = document.getElementById('search-q');
+if (sq) sq.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); doSearch(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); });
+/* Output dock starts collapsed; an explicit Expand/Collapse is remembered per browser. */
+applyDockMin((() => { try { return localStorage.getItem(DOCK_MIN_KEY) !== '0'; } catch (e) { return true; } })(), false);
+window.addEventListener('resize', syncDockPad);
+['model','access','maintenance'].forEach(vtabRestore);
+navigate(location.hash.replace('#/','') || 'dashboard');
+refreshAll();
+</script>
+</body>
+</html>
