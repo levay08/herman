@@ -276,6 +276,7 @@
   }
   .proj .btnrow,.proj-actions{gap:6px}
   .modal-kv{grid-template-columns:auto minmax(0,1fr);gap:3px var(--s3);font-size:12.6px;margin:var(--s2) 0 var(--s3)}
+  .modal-card.wide .modal-kv{grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr)}
   .modal-kv dt{font-size:11.9px}
   .modal-kv dd{white-space:normal;overflow-wrap:anywhere}
   .modal-kv dd.wide{grid-column:2/-1}
@@ -359,6 +360,9 @@
          padding:var(--s4);overflow:auto;backdrop-filter:blur(2px)}
   .modal[hidden]{display:none}
   .modal-card{width:min(430px,92vw);max-height:88vh;overflow:auto;position:relative}
+  /* The message view carries a full message plus the surrounding turns: at 430px every line wrapped
+     three times and the session kv column collapsed. Wide enough to read, still inside the viewport. */
+  .modal-card.wide{width:min(880px,94vw)}
   .modal-card h3{padding-right:40px}
   .modal-x{position:absolute;top:9px;right:9px;width:30px;height:30px;min-height:0;padding:0;
            border-radius:8px;border:1px solid var(--danger-line);background:none;color:var(--danger);
@@ -937,7 +941,7 @@
     </div>
 
     <div class="modal" id="msg-modal" hidden>
-      <div class="modal-card card pad">
+      <div class="modal-card card pad wide">
         <h3 id="msg-head">Message</h3>
         <p class="hint" id="msg-meta">…</p>
         <dl class="kv modal-kv" id="msg-session"></dl>
