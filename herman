@@ -2632,7 +2632,8 @@ def model_endpoint(name: str) -> tuple[str, str, str]:
     return pick("provider"), pick("base_url"), pick("api_key")
 
 
-def endpoint_catalog(name: str, *, force: bool = False, max_age: int = 12 * 3600) -> dict:
+def endpoint_catalog(name: str, *, force: bool = False, max_age: int = 12 * 3600,
+                     persist: bool = True) -> dict:
     """The model list for one project, resolved in the order Hermes itself would use it.
 
     1. the project's own endpoint: ``{base_url}/v1/models`` (cached for 12h, API key sent only when
@@ -2643,7 +2644,8 @@ def endpoint_catalog(name: str, *, force: bool = False, max_age: int = 12 * 3600
     4. the project's configured model on its own, so the board is never empty
 
     Nothing here can raise: every read and every request is guarded, and the returned dict always has
-    the same shape (``source``, ``endpoint``, ``provider``, ``models``, ``age_s``).
+    the same shape (``source``, ``endpoint``, ``provider``, ``models``, ``age_s``). ``persist=False``
+    fetches live without touching the 12h cache, which is what ``sync --dry-run`` needs.
     """
     meta = catalog_meta()
     provider, base_url, key = model_endpoint(name)
@@ -2694,13 +2696,14 @@ def endpoint_catalog(name: str, *, force: bool = False, max_age: int = 12 * 3600
             enrich_prices(live)
         except Exception:
             pass
-        try:
-            CATALOG_CACHE.parent.mkdir(parents=True, exist_ok=True)
-            CATALOG_CACHE.write_text(json.dumps(
-                {"ts": time.time(), "base_url": base_url, "source": "live", "models": live}),
-                encoding="utf-8")
-        except OSError:
-            pass
+        if persist:
+            try:
+                CATALOG_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                CATALOG_CACHE.write_text(json.dumps(
+                    {"ts": time.time(), "base_url": base_url, "source": "live", "models": live}),
+                    encoding="utf-8")
+            except OSError:
+                pass
         return {"source": "live", "endpoint": base_url, "provider": provider,
                 "models": ensure_current(live, model, provider), "age_s": 0}
     rows = hermes_catalog(provider, model)
@@ -3211,12 +3214,17 @@ def _price_catalog() -> dict:
             if not isinstance(cost, dict):
                 continue
             try:
-                out[str(mid).lower()] = {
+                row = {
                     "input": float(cost.get("input") or 0),
                     "output": float(cost.get("output") or 0),
                     "cache_read": float(cost.get("cache_read") or 0),
                     "context": int(((meta.get("limit") or {}).get("context")) or 0),
                 }
+                # cache_write is a real price key for some providers (vertex/gemini and friends) and
+                # absent for others: keep it out instead of pretending it costs 0.
+                if cost.get("cache_write") is not None:
+                    row["cache_write"] = float(cost["cache_write"])
+                out[str(mid).lower()] = row
             except (TypeError, ValueError):
                 continue
     return out
@@ -3311,6 +3319,98 @@ def _summarize(rows: list[dict], catalog: dict, days: int = USAGE_DAYS) -> dict:
     est = [m["est_usd"] for m in model_list if m["est_usd"] is not None]
     total["est_usd"] = round(sum(est), 4) if est else None
     return {"totals": total, "models": model_list, "days": series}
+
+
+def cache_analytics(name: str) -> dict:
+    """Prompt-cache analytics of one project: hit rate, fresh input and what the cache saved.
+
+    Read-only sqlite over ``session_model_usage``. The token counts are what the provider
+    reported; the hit rate is ``cache_read / (cache_read + fresh input)`` (a cache read is a
+    prompt token the provider served from its own cache, so it is NOT part of the fresh input
+    count), and the money is priced with the same third-party table the usage view uses, so it
+    is an estimate, never an invoice. A model the table does not know is listed as unpriced
+    instead of being counted as free.
+    """
+    catalog = _price_catalog()
+    rows = _usage_rows(profile_home(name))
+
+    def blank() -> dict:
+        return {"fresh": 0, "cache_read": 0, "cache_write": 0, "output": 0, "reasoning": 0,
+                "calls": 0}
+
+    def add(b: dict, r: dict) -> None:
+        b["fresh"] += int(r.get("input_tokens") or 0)
+        b["cache_read"] += int(r.get("cache_read_tokens") or 0)
+        b["cache_write"] += int(r.get("cache_write_tokens") or 0)
+        b["output"] += int(r.get("output_tokens") or 0)
+        b["reasoning"] += int(r.get("reasoning_tokens") or 0)
+        b["calls"] += int(r.get("api_call_count") or 0)
+
+    def rates(b: dict) -> None:
+        prompt = b["fresh"] + b["cache_read"]
+        b["prompt"] = prompt
+        b["hit_pct"] = round(100.0 * b["cache_read"] / prompt, 1) if prompt else 0.0
+
+    totals = blank()
+    models: dict[str, dict] = {}
+    days: dict[str, dict] = {}
+    sessions: set[str] = set()
+    for r in rows:
+        add(totals, r)
+        sid = str(r.get("session_id") or "")
+        if sid:
+            sessions.add(sid)
+        mid = str(r.get("model") or "unknown")
+        mb = models.get(mid)
+        if mb is None:
+            mb = models[mid] = dict(blank(), model=mid, sessions=set())
+        add(mb, r)
+        if sid:
+            mb["sessions"].add(sid)
+        d = _day(r.get("last_seen") or r.get("first_seen"))
+        if d:
+            db = days.get(d)
+            if db is None:
+                db = days[d] = dict(blank(), day=d)
+            add(db, r)
+
+    money = {"saved": 0.0, "fresh": 0.0, "paid": 0.0, "write": 0.0, "write_priced": False,
+             "priced": 0}
+    unpriced: list[str] = []
+    model_list = []
+    for mb in models.values():
+        rates(mb)
+        mb["sessions"] = len(mb["sessions"])
+        price = _model_price(mb["model"], catalog)
+        mb["priced"] = bool(price)
+        if price:
+            read = mb["cache_read"] / 1e6
+            money["priced"] += 1
+            money["fresh"] += read * price["input"]
+            money["paid"] += read * price["cache_read"]
+            money["saved"] += read * (price["input"] - price["cache_read"])
+            mb["fresh_usd"] = round(read * price["input"], 4)
+            mb["paid_usd"] = round(read * price["cache_read"], 4)
+            mb["saved_usd"] = round(read * (price["input"] - price["cache_read"]), 4)
+            if "cache_write" in price:
+                money["write_priced"] = True
+                money["write"] += mb["cache_write"] / 1e6 * price["cache_write"]
+                mb["write_usd"] = round(mb["cache_write"] / 1e6 * price["cache_write"], 4)
+        else:
+            unpriced.append(mb["model"])
+        model_list.append(mb)
+    model_list.sort(key=lambda m: m["cache_read"], reverse=True)
+    day_list = sorted(days.values(), key=lambda d: d["day"])
+    for db in day_list:
+        rates(db)
+    rates(totals)
+    totals["sessions"] = len(sessions)
+    return {"project": name, "totals": totals, "models": model_list, "days": day_list,
+            "saved_usd": round(money["saved"], 4), "fresh_usd": round(money["fresh"], 4),
+            "paid_usd": round(money["paid"], 4),
+            "write_usd": round(money["write"], 4) if money["write_priced"] else None,
+            "priced_models": money["priced"], "unpriced_models": unpriced,
+            "window_days": USAGE_DAYS}
 
 
 def usage_report(name: str) -> dict:
@@ -3526,13 +3626,20 @@ def _error_digest(home: Path, limit: int = 8) -> dict:
 
 
 def insights_report(name: str, limit: int = 15) -> dict:
-    """Activity, tool usage, context/compression health and the error digest of one project."""
+    """Activity, tool usage, context/compression health and the error digest of one project.
+
+    Also carries the prompt-cache analytics (``cache``) and the raw series the Activity rundown
+    needs: ``daily`` (every day with messages, ascending, bounded to 5 years) and ``hourly``
+    (messages per hour per day for the recent months, so a single day can be broken down).
+    """
     home = profile_home(name)
     out: dict = {"project": name, "activity": [], "hours": [0] * 24, "tools": [],
                  "context": [], "errors": _error_digest(home), "sessions": 0, "messages": 0,
-                 "live": sorted(_live_session_ids(name))}
+                 "live": sorted(_live_session_ids(name)), "daily": [], "hourly": [],
+                 "cache": None}
     con = _sqlite_ro(home / "state.db")
     if con is None:
+        out["cache"] = cache_analytics(name)
         return out
     try:
         for r in con.execute(
@@ -3542,6 +3649,26 @@ def insights_report(name: str, limit: int = 15) -> dict:
                 " group by d order by d desc limit ?", (USAGE_DAYS,)):
             out["activity"].append({"day": r["d"], "messages": r["n"], "user": r["u"],
                                     "assistant": r["a"], "tool": r["t"], "token": r["msg_tokens"]})
+        # The full per-day series, newest 5 years, flipped to ascending: the rundown buckets it
+        # into weeks, months and years in the browser, so the SQL stays one cheap group-by.
+        for r in con.execute(
+                "select date(timestamp, 'unixepoch', 'localtime') d, count(*) n,"
+                " sum(role = 'user') u, sum(role = 'assistant') a, sum(role = 'tool') t,"
+                " sum(coalesce(token_count, 0)) msg_tokens,"
+                " sum(case when tool_name is not null and tool_name <> '' then 1 else 0 end) calls"
+                " from messages where timestamp is not null group by d order by d desc limit 1825"):
+            out["daily"].append({"day": r["d"], "messages": r["n"], "user": r["u"],
+                                 "assistant": r["a"], "tool": r["t"], "token": r["msg_tokens"],
+                                 "calls": r["calls"]})
+        out["daily"].reverse()
+        for r in con.execute(
+                "select date(timestamp, 'unixepoch', 'localtime') d,"
+                " cast(strftime('%H', timestamp, 'unixepoch', 'localtime') as integer) h,"
+                " count(*) n, sum(coalesce(token_count, 0)) tok from messages"
+                " where timestamp is not null and timestamp >= strftime('%s', 'now') - ?"
+                " group by d, h order by d asc", (180 * 86400,)):
+            out["hourly"].append({"day": r["d"], "hour": r["h"], "messages": r["n"],
+                                  "token": r["tok"]})
         for r in con.execute(
                 "select strftime('%H', timestamp, 'unixepoch', 'localtime') h, count(*) n"
                 " from messages where timestamp is not null group by h"):
@@ -3577,6 +3704,7 @@ def insights_report(name: str, limit: int = 15) -> dict:
         out["error"] = str(exc)
     finally:
         con.close()
+    out["cache"] = cache_analytics(name)
     return out
 
 
@@ -4688,6 +4816,82 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
             res["warnings"].append(f"{nm}: {dead} stale session lease(s) in runtime/active_sessions.json"
                                    " (Hermes owns that file; herman reports but never rewrites it)")
 
+    # model catalogs: herman asks each project's own endpoint for its LIVE list, so a model added
+    # on the provider side is listable, pickable and settable right away instead of waiting for
+    # the 12h cache to expire. `sync --fix` writes the refreshed cache and
+    # remembers the ids, so the next sync can name exactly what appeared or disappeared.
+    seen = st.get("models_at_sync") or {}
+    fresh: dict[str, list[str]] = {}
+    shared: dict[str, list[str]] = {}
+    source: dict[str, str] = {}
+    for nm in projects:
+        _provider, base, _key = model_endpoint(nm)
+        if not base:
+            continue
+        cat = endpoint_catalog(nm, force=True, persist=(not dry))
+        ids = sorted({str(m.get("id") or "") for m in (cat.get("models") or [])
+                      if str(m.get("id") or "")})
+        if not ids:
+            res["warnings"].append(f"{nm}: the endpoint {base} answered no model list"
+                                   f" (source: {cat.get('source')}), so the picker only offers the"
+                                   " configured model")
+            continue
+        # Only a LIVE answer may be recorded: a fallback (herman's cache, the engine's cache or the
+        # user's own catalog file) is a stale view, and writing it would either hide a new model or
+        # report models as gone because the file is behind the endpoint.
+        if str(cat.get("source")) != "live":
+            res["warnings"].append(f"{nm}: {base} answered no live model list, so this run sees "
+                                   f"{len(ids)} ids from {cat.get('source')}; the live list stays "
+                                   "authoritative, nothing was recorded or cached")
+            continue
+        fresh[base] = ids
+        source[base] = str(cat.get("source"))
+        if nm not in shared.setdefault(base, []):
+            shared[base].append(nm)
+        # Hermes keeps its own picker cache per profile. herman never writes it (bridge rule):
+        # it compares and, when the engine's copy is behind for this endpoint, names the one
+        # command that fixes it (the engine refuses that command outside a real terminal).
+        eng = profile_home(nm) / "provider_models_cache.json"
+        try:
+            ecache = json.loads(eng.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(ecache, dict):
+            continue
+        host = re.sub(r"^https?://", "", base).split("/")[0]
+        behind: list[str] = []
+        for fprint, val in ecache.items():
+            models = (val or {}).get("models") if isinstance(val, dict) else None
+            if not isinstance(models, list) or host not in str(fprint):
+                continue          # another provider's list: not this endpoint's business
+            have = {str(m) for m in models}
+            behind = [i for i in ids if i not in have]
+        if behind:
+            res["warnings"].append(f"{nm}: Hermes' own picker cache for {host} misses {len(behind)}"
+                                   f" of the {len(ids)} live ids (for example {', '.join(behind[:4])});"
+                                   f" refresh it in a terminal with `hermes -p {nm} model --refresh`"
+                                   " (the engine refuses that command outside a TTY)")
+
+    for base, ids in fresh.items():
+        who = ", ".join(shared[base])
+        known = list(seen.get(base) or [])
+        added = [i for i in ids if i not in known]
+        gone = [i for i in known if i not in ids]
+        label = f"model list for {who}: {len(ids)} ids from {base} ({source.get(base)})"
+        if added or gone:
+            bits = []
+            if added:
+                bits.append(f"+{len(added)} new: " + ", ".join(added[:6])
+                            + (" …" if len(added) > 6 else ""))
+            if gone:
+                bits.append(f"-{len(gone)} gone: " + ", ".join(gone[:6])
+                            + (" …" if len(gone) > 6 else ""))
+            res["synced"].append(label + " · " + " · ".join(bits))
+        elif known:
+            res["unchanged"].append(label + " (unchanged)")
+        else:
+            res["unchanged"].append(label + " (first sync recorded)")
+
     # runtime facts (reported, never changed from here)
     res["dashboard"] = dashboard_info()
     pid = _panel_pid()
@@ -4712,7 +4916,9 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
         st["engine_at_sync"] = engine
         st["last_sync"] = time.time()
         st["projects_at_sync"] = projects
+        st["models_at_sync"] = fresh
         save_state(st)
+    res["catalogs"] = fresh
     return res
 
 
@@ -4743,6 +4949,10 @@ def do_sync(*, fix: bool = False, dry: bool = False, as_json: bool = False) -> d
               f" (port {res['dashboard']['port']})"
               f" · panel {'running pid ' + str(res['panel']['pid']) if res['panel']['running'] else 'not running'}"
               f" (port {res['panel']['port']})"))
+    for base, ids in (res.get("catalogs") or {}).items():
+        print(f"  model list       {len(ids):>4} ids live from {base}"
+              + (dim("   (the picker offers them now)") if fix else
+                 dim(f"   (`{PROG} sync --fix` caches them for the boards)")))
     for title, key in (("already fine", "unchanged"), ("synced", "synced"),
                        ("stale, removable", "removed"), ("needs attention", "warnings")):
         items = res.get(key) or []

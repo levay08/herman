@@ -57,8 +57,8 @@ def strip_own_rules(text: str, path: Path) -> str:
     line count is preserved so reported line numbers still match the real file.
 
     The name decides as well as the path: the release gate runs the INSTALLED scanner over the
-    PUBLISHED copy in the working tree, so comparing paths alone made `preflight.py <repo>/preflight.py`
-    report 1 blocking finding ('hero') against the scanner's own rule list.
+    PUBLISHED copy in the working tree, so comparing paths alone made that run report a blocking
+    finding against the scanner's own rule list (the docstring quotes nothing it hunts for).
     """
     try:
         if path.resolve() != Path(__file__).resolve() and path.name != Path(__file__).name:
