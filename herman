@@ -36,6 +36,18 @@ from pathlib import Path
 
 PROG = "herman"                    # change this one line to rename the tool
 POSIX = os.name == "posix"         # /proc, POSIX signals and file modes exist only on POSIX
+
+
+def in_container() -> bool:
+    """True when herman runs from a container image (its own marker or the usual runtime files).
+
+    It matters for `sync`: the per-project shortcut wrappers in ~/.local/bin belong to the HOST. Inside
+    a container they are simply absent, and writing them there would be useless noise, so the check
+    reports them as informational instead of a warning.
+    """
+    if os.environ.get("HERMAN_IN_CONTAINER"):
+        return True
+    return any(Path(p).exists() for p in ("/.dockerenv", "/run/.containerenv"))
 VERSION = "0.1"
 AUTHOR = ""            # no personal name in a public repo
 REPO = "https://github.com/levay08/herman"   # shown wherever the old byline used to be
@@ -4525,7 +4537,11 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
                 continue
             if small and "hermes -p " in body:
                 stale_short.append(f.name)
+    in_box = in_container()
     for nm in missing_short:
+        if in_box and not fix:
+            res["unchanged"].append(f"shortcut '{nm}' (not needed inside this container)")
+            continue
         if fix and not dry:
             try:
                 sc = bin_dir / nm
@@ -4560,6 +4576,10 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
                 res["warnings"].append(f"could not remove stale shortcut '{nm}': {exc}")
                 continue
         res["removed"].append(f"stale shortcut '{nm}' (no such project; `{PROG} sync --fix` removes it)")
+    if in_box and (missing_short or retargeted or stale_short):
+        res["warnings"] = [w for w in res["warnings"] if "shortcut command missing" not in w]
+    if in_container():
+        res["unchanged"].append("running from a container image (shortcut wrappers belong to the host)")
     if not (missing_short or retargeted or stale_short):
         res["unchanged"].append(f"shortcut commands ({len([p for p in projects if p != DEFAULT_HERMES])})")
 
@@ -4604,6 +4624,69 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
                                   + f" (`{PROG} sync --fix` clears them)")
     else:
         res["unchanged"].append("saved state")
+
+    # orphaned files: a dead panel's pid file, a cached model list for an endpoint no project uses
+    # any more, and temp files an interrupted write left behind. Reported always, removed with --fix.
+    orphans: list[tuple[Path, str]] = []
+    live_urls = set()
+    for nm in projects:
+        try:
+            live_urls.add(model_endpoint(nm)[1])
+        except Exception:
+            continue
+    for f in sorted(HERMAN_CACHE.glob("web*.pid")):
+        pid = 0
+        try:
+            info = json.loads(f.read_text(encoding="utf-8").strip())
+            pid = int((info or {}).get("pid") or 0) if isinstance(info, dict) else int(info or 0)
+        except (OSError, ValueError, TypeError):
+            pid = 0
+        if not (pid and _pid_alive(pid)):
+            orphans.append((f, "panel pid file for a process that is gone"))
+    cat = HERMAN_CACHE / "models-cache.json"
+    if cat.exists():
+        try:
+            cached = json.loads(cat.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cached = None
+        cached_url = (cached or {}).get("base_url") if isinstance(cached, dict) else None
+        if cached_url and cached_url not in live_urls:
+            orphans.append((cat, f"cached model list for an endpoint no project uses ({cached_url})"))
+    for tmp in sorted(HERMAN_CACHE.glob("*.tmp")):
+        orphans.append((tmp, "temp file left by an interrupted write"))
+    for path, why in orphans:
+        if fix and not dry:
+            try:
+                path.unlink()
+                res["removed"].append(f"{path.name}: {why}")
+                continue
+            except OSError as exc:
+                res["warnings"].append(f"could not remove {path.name}: {exc}")
+                continue
+        res["removed"].append(f"{path.name}: {why} (`{PROG} sync --fix` clears it)")
+    if not orphans:
+        res["unchanged"].append("no orphaned files")
+
+    # session leases whose process is gone: Hermes owns that file, so herman reports but never rewrites it
+    for nm in projects:
+        lease = profile_home(nm) / "runtime" / "active_sessions.json"
+        if not lease.exists():
+            continue
+        try:
+            entries = json.loads(lease.read_text(encoding="utf-8")).get("entries") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        dead = 0
+        for e in entries:
+            try:
+                pid = int((e or {}).get("pid") or 0)
+            except (TypeError, ValueError):
+                pid = 0
+            if not (pid and _pid_alive(pid)):
+                dead += 1
+        if dead:
+            res["warnings"].append(f"{nm}: {dead} stale session lease(s) in runtime/active_sessions.json"
+                                   " (Hermes owns that file; herman reports but never rewrites it)")
 
     # runtime facts (reported, never changed from here)
     res["dashboard"] = dashboard_info()

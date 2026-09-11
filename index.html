@@ -504,7 +504,7 @@
             <select id="focus" onchange="onFocusChange()" title="Every project board below shows this project."></select>
           </div>
           <button class="primary" onclick="openCreateModal()" title="herman -p <name> · opens the create form in a dialog.">Create new project</button>
-          <button class="ghost" onclick="syncNow()" title="herman sync --fix: re-check herman against the installed Hermes (version, profiles, shortcuts, panel files), repair the harmless ones, then reload every board. The result prints in the output panel.">Refresh</button>
+          <button class="ghost" onclick="syncNow()" title="hard refresh: runs herman sync --fix (re-checks the engine, profiles, shortcuts and panel files, clears what is stale), prints the result in the output panel, then reloads this page from a fresh URL so a stale tab cannot keep running old JavaScript.">Refresh</button>
         </div>
       </div>
     </div>
@@ -2167,10 +2167,38 @@ const LABELS = {
   'access-revoke-host': 'Removing host…', 'access-unset-env': 'Revoking API key…',
   'access-new-key': 'Creating SSH key…',
 };
-function syncNow(){
-  /* The header Refresh button is herman's sync: it re-checks the engine behind the panel, repairs
-     the harmless drift and reports what held / changed / went stale in the output panel. */
-  run('sync', '');
+function pruneUiState(){
+  /* Drop UI state that points at something which no longer exists: a sub-tab that is gone from this
+     build, or a whole board that was removed. Generic, it reads the views and panes out of the DOM,
+     so nothing has to be maintained here when a board changes. */
+  try {
+    const views = new Set();
+    document.querySelectorAll('.view').forEach(v => {
+      const view = (v.id || '').replace(/^view-/, '');
+      if (!view) return;
+      views.add(view);
+      const subs = new Set([...v.querySelectorAll('.subpane[data-sub]')].map(p => p.dataset.sub));
+      const key = 'herman.vt.' + view;
+      const cur = localStorage.getItem(key);
+      if (cur && subs.size && !subs.has(cur)) localStorage.removeItem(key);
+    });
+    Object.keys(localStorage).forEach(k => {
+      if (!k.startsWith('herman.vt.')) return;
+      const view = k.slice('herman.vt.'.length);
+      if (!views.has(view)) localStorage.removeItem(k);
+    });
+  } catch (e) { /* private mode or blocked storage: nothing to prune */ }
+}
+async function syncNow(){
+  /* The header Refresh button: sync with the engine (and clean what sync can clear), then reload the
+     page hard. The reload is the point: a tab that was open before an update keeps running the old
+     JavaScript, and no amount of re-fetching fixes a stale page. */
+  setStatus('running', 'Syncing and reloading…');
+  try { await run('sync', ''); } catch (e) { /* the reload below still has to happen */ }
+  pruneUiState();
+  const u = new URL(location.href);
+  u.searchParams.set('v', String(Date.now()));      // a fresh URL defeats any cached copy
+  location.replace(u.toString());                    // replace(): no extra history entry
 }
 const MUTATING_ACTIONS = new Set([
   /* mirrors the panel's POST-only list: a state change must never ride on a GET, so a prefetch,
@@ -2444,7 +2472,12 @@ async function openTerminalNow(name){
   try {
     const d = await (await fetch(`/api/open-terminal?t=${TOKEN}&name=${encodeURIComponent(name)}`)).json();
     setStatus(d.ok ? 'done' : 'error', d.msg || (d.ok ? 'Session opened.' : 'Could not open a terminal.'));
-    if (d.ok) say('✓ ' + d.msg);
+    if (d.ok){
+      say('✓ ' + d.msg);
+      /* Hermes writes the session lease a moment after the window opens, so re-check right away
+         instead of waiting for the next poll: the card's session count has to move on its own. */
+      [600, 1500, 3500, 6000].forEach(ms => setTimeout(pollLive, ms));
+    }
   } catch (e){ setStatus('error', 'Request failed: ' + e); }
 }
 async function openDashboard(){
@@ -2578,7 +2611,7 @@ window.addEventListener('resize', syncHeadH);
 syncHeadH();
 
 document.querySelectorAll('.navlink').forEach(b => b.onclick = () => navigate(b.dataset.route));
-setInterval(pollLive, 10000);
+setInterval(pollLive, 3000);   /* a session started elsewhere shows up within a few seconds */
 const sq = document.getElementById('search-q');
 if (sq) sq.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); doSearch(); } });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); });

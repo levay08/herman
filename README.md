@@ -134,6 +134,9 @@ docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
 - `Enter session` and the terminal window need a desktop, so run those from the host CLI
 - the engine version inside the image can drift from your host install:
   `docker build --build-arg HERMES_BRANCH=<branch> -t herman .` pins it
+- the code is baked into the image, so after pulling changes run `docker compose up --build` again
+- inside the container the per-project shortcut commands are not needed and not reported as missing;
+  the engine binary, profiles and data still come from your own installation and mount
 
 ## Troubleshooting
 

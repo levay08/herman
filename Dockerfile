@@ -17,6 +17,7 @@ ARG HERMES_BRANCH=main
 ARG HERMES_INSTALL_DIR=/opt/hermes-agent
 
 ENV DEBIAN_FRONTEND=noninteractive \
+    HERMAN_IN_CONTAINER=1 \
     HERMES_INSTALL_DIR=${HERMES_INSTALL_DIR} \
     HERMES_HOME=/home/herman/.hermes \
     PATH=/home/herman/.local/bin:/usr/local/bin:/usr/bin:/bin \
