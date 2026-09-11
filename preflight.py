@@ -55,9 +55,13 @@ def strip_own_rules(text: str, path: Path) -> str:
     The words and regexes it looks for appear verbatim in this file, so a self-scan would report the
     pattern list as operator data and block every release over a file that holds no data at all. The
     line count is preserved so reported line numbers still match the real file.
+
+    The name decides as well as the path: the release gate runs the INSTALLED scanner over the
+    PUBLISHED copy in the working tree, so comparing paths alone made `preflight.py <repo>/preflight.py`
+    report 1 blocking finding ('hero') against the scanner's own rule list.
     """
     try:
-        if path.resolve() != Path(__file__).resolve():
+        if path.resolve() != Path(__file__).resolve() and path.name != Path(__file__).name:
             return text
     except OSError:
         return text
@@ -80,8 +84,8 @@ def strip_own_rules(text: str, path: Path) -> str:
 def scan(path: Path) -> list[tuple[str, str, int, str]]:
     try:
         text = strip_own_rules(path.read_text(encoding="utf-8"), path)
-    except OSError:
-        return []
+    except (OSError, UnicodeDecodeError):
+        return []        # unreadable or binary (caduceus.png): nothing textual to grep for
     findings: list[tuple[str, str, int, str]] = []
     for label, pattern, severity in RULES:
         rx = re.compile(pattern)

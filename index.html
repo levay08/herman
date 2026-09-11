@@ -17,6 +17,10 @@
     --warn-bg:#fff7ed; --warn-line:#fed7aa;
     --row-hover:#fbfeff; --chip-bg:#fff; --on-solid:#fff; --dot-off:#c3ced4; --grip:#d3e0e5;
     --code-text:#1e343d; --topbar-bg:rgba(245,248,250,.94);
+    /* scrollbars carry the theme too: the output frame uses the accent pair, every other
+       scroller the neutral pair. Never a raw colour in the rules below. */
+    --scroll-track:#eef3f6; --scroll-thumb:#7fa4ae; --scroll-thumb-hover:#0d9488;
+    --scroll-out:#4f9c94; --scroll-out-hover:#0f766e;
     --hero-a:#fff; --hero-b:#fbfefe;
     --default-soft:#eef4ff; --default-line:#cfe0fb;
     --card-hover:0 4px 14px rgba(16,40,50,.08); --card-hover-line:#d3dee4;
@@ -27,7 +31,7 @@
     --r-card:12px; --r-ctl:9px; --r-pill:999px;
     --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
     --shadow:0 1px 2px rgba(16,40,50,.05); --shadow-up:0 -6px 20px rgba(16,40,50,.06);
-    --side-w:232px; --head-h:96px; --dock-h:26vh; --content-max:1180px;
+    --side-w:232px; --head-h:96px; --dock-h:20vh; --dock-max:46vh; --content-max:1180px;
     --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
   }
   /* Dark palette: same token names, darker surfaces and lighter accents.
@@ -44,6 +48,8 @@
     --warn-bg:#3a2a15; --warn-line:#6b4d22;
     --row-hover:#1b262e; --chip-bg:#1b2a33; --on-solid:#fff; --dot-off:#3d515d; --grip:#3d515d;
     --code-text:#d6e6ec; --topbar-bg:rgba(14,22,27,.9);
+    --scroll-track:#1f2b33; --scroll-thumb:#5f7c8c; --scroll-thumb-hover:#2dd4bf;
+    --scroll-out:#3aa89b; --scroll-out-hover:#2dd4bf;
     --hero-a:#18232b; --hero-b:#141e25;
     --default-soft:#152134; --default-line:#2b4568;
     --card-hover:0 6px 18px rgba(0,0,0,.45); --card-hover-line:#3d515d;
@@ -55,12 +61,12 @@
   }
   *{box-sizing:border-box}
   ::selection{background:var(--teal-soft);color:var(--text)}
-  *{scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+  *{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) var(--scroll-track)}
   *::-webkit-scrollbar{width:10px;height:10px}
-  *::-webkit-scrollbar-track{background:transparent}
-  *::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:var(--r-pill);
+  *::-webkit-scrollbar-track{background:var(--scroll-track)}
+  *::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:var(--r-pill);
                              border:3px solid transparent;background-clip:content-box}
-  *::-webkit-scrollbar-thumb:hover{background:var(--dim2);background-clip:content-box}
+  *::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hover);background-clip:content-box}
   html,body{margin:0;padding:0}
   body{background:var(--bg);color:var(--text);transition:background-color .16s ease,color .16s ease;
        font:13.6px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Ubuntu","Cantarell","Helvetica Neue",Arial,sans-serif;
@@ -401,10 +407,18 @@
   .dock-grip{height:6px;cursor:ns-resize;background:var(--surface);display:flex;justify-content:center}
   .dock-grip::after{content:"";width:44px;height:3px;border-radius:var(--r-pill);background:var(--grip);margin-top:2px}
   .dock-grip:hover::after{background:var(--teal)}
-  #out{margin:0;padding:10px var(--s5) 14px;height:var(--dock-h);max-height:62vh;
+  #out{margin:0;padding:10px var(--s5) 14px;height:var(--dock-h);max-height:var(--dock-max,46vh);
        overflow:auto;overscroll-behavior:contain;
        font-family:var(--mono);font-size:12.5px;line-height:1.55;color:var(--code-text);
        background:var(--surface2);white-space:pre-wrap;word-break:break-word}
+  /* The output frame owns the accent scrollbar, so the scroll of a long command is themed
+     instead of a grey-on-grey thumb; the rules stay token-only and follow both palettes. */
+  #out{scrollbar-width:thin;scrollbar-color:var(--scroll-out) var(--scroll-track)}
+  #out::-webkit-scrollbar{width:12px;height:12px}
+  #out::-webkit-scrollbar-track{background:var(--scroll-track)}
+  #out::-webkit-scrollbar-thumb{background:var(--scroll-out);border-radius:var(--r-pill);
+                                border:3px solid transparent;background-clip:content-box}
+  #out::-webkit-scrollbar-thumb:hover{background:var(--scroll-out-hover);background-clip:content-box}
   #out .out-empty{color:var(--dim2)}
   .dock.min #out,.dock.min .dock-grip,.dock.min .progress{display:none}
 
@@ -1073,13 +1087,33 @@ function setStatus(state, text){
   progress.className = 'progress' + (state === 'running' ? '' : ' idle');
 }
 const DOCK_MIN_KEY = 'herman.dock.min';
+const DOCK_MAX_RATIO = 0.46;   /* the dock never covers more than this share of the window */
+function dockMaxPx(){ return Math.max(140, Math.round(window.innerHeight * DOCK_MAX_RATIO)); }
 function syncDockPad(){
-  /* The dock is fixed; the content needs exactly its height as bottom padding, and a
-     collapsed dock must not leave a 26vh hole under the last card. */
+  /* The dock is fixed, so `.content` needs exactly its height as bottom padding: that is
+     what keeps the last card of EVERY board above the dock instead of under it. It is
+     called from navigate() and from a ResizeObserver on the dock, so the pad follows the
+     real dock height in every menu and every dock state (expanded, collapsed, dragged, or
+     a height saved in a taller window). A collapsed dock must not leave a hole either. */
   const dock = document.getElementById('dock');
   if (!dock) return;
   document.documentElement.style.setProperty(
     '--dock-pad', Math.round(dock.getBoundingClientRect().height) + 16 + 'px');
+}
+function clampDockH(){
+  /* A height saved on a big window must not swallow a small one: cap it on load and on
+     every resize, and keep the store in step with what is really rendered. */
+  const dock = document.getElementById('dock');
+  if (!dock) return;
+  const saved = parseFloat(localStorage.getItem('herman.dock') || '0');
+  if (saved > 120) {
+    const capped = Math.min(saved, dockMaxPx());
+    if (capped !== saved) {
+      dock.style.setProperty('--dock-h', capped + 'px');
+      try { localStorage.setItem('herman.dock', String(capped)); } catch (e) {}
+    }
+  }
+  syncDockPad();
 }
 function applyDockMin(min, store){
   const dock = document.getElementById('dock');
@@ -1144,6 +1178,7 @@ function navigate(route){
   const loader = ROUTE_LOAD[r];
   if (loader) loader();               // every tab pulls its own data
   window.scrollTo({top:0});
+  syncDockPad();                      // the pad follows whichever board is now showing
 }
 function onFocusChange(){
   loadFocus();                        // model, git and access follow the focus project
@@ -2541,8 +2576,7 @@ function fmtTime(ts){
   const dock = document.getElementById('dock');
   const grip = document.getElementById('dock-grip');
   const outEl = document.getElementById('out');
-  const saved = parseFloat(localStorage.getItem('herman.dock') || '0');
-  if (saved > 120) dock.style.setProperty('--dock-h', saved + 'px');
+  clampDockH();                       /* a height saved elsewhere is capped for this window */
   let dragging = false, startY = 0, startH = 0;
   grip.addEventListener('mousedown', e => {
     dragging = true; startY = e.clientY; startH = outEl.getBoundingClientRect().height;
@@ -2550,7 +2584,7 @@ function fmtTime(ts){
   });
   window.addEventListener('mousemove', e => {
     if (!dragging) return;
-    const h = Math.max(120, Math.min(window.innerHeight * 0.62, startH + (startY - e.clientY)));
+    const h = Math.max(120, Math.min(dockMaxPx(), startH + (startY - e.clientY)));
     dock.style.setProperty('--dock-h', h + 'px');
     syncDockPad();
   });
@@ -2563,6 +2597,9 @@ function fmtTime(ts){
     dock.style.removeProperty('--dock-h'); localStorage.removeItem('herman.dock');
     syncDockPad();
   });
+  /* Any change of the dock's real height (head wrapping, status text, a resize, the saved
+     height) re-writes the content padding, which is what keeps every board clear of it. */
+  if (window.ResizeObserver) new ResizeObserver(() => syncDockPad()).observe(dock);
 })();
 
 function runFocus(action, extra){ run(action, focusProject, extra); }
@@ -2638,7 +2675,7 @@ if (sq) sq.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventD
 document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); });
 /* Output dock starts collapsed; an explicit Expand/Collapse is remembered per browser. */
 applyDockMin((() => { try { return localStorage.getItem(DOCK_MIN_KEY) !== '0'; } catch (e) { return true; } })(), false);
-window.addEventListener('resize', syncDockPad);
+window.addEventListener('resize', clampDockH);   /* cap a saved height, then re-pad the content */
 ['model','access','maintenance'].forEach(vtabRestore);
 navigate(location.hash.replace('#/','') || 'dashboard');
 refreshAll();
