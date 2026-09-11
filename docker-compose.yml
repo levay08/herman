@@ -1,0 +1,36 @@
+# herman with Docker Compose: the easy path on any OS (Linux, macOS, Windows with Docker Desktop).
+#
+#   docker compose up --build        start the panel at http://127.0.0.1:9120
+#   docker compose exec herman herman web --url      print the URL including the access token
+#   docker compose exec herman herman -l             use the CLI inside the container
+#   docker compose run --rm herman herman security   run the security battery
+#
+# ${HOME} is expanded by Compose on Linux and macOS. On Windows, replace it with the literal path,
+# for example C:/Users/<you>/.hermes (forward slashes), or export it in a .env file next to this file.
+services:
+  herman:
+    build:
+      context: .
+      args:
+        HERMES_BRANCH: main          # pin to the branch your host Hermes runs, to avoid drift
+    image: herman:0.1
+    container_name: herman
+    restart: unless-stopped
+    ports:
+      # 127.0.0.1 on the left: the panel stays reachable only from this machine. Publishing
+      # 0.0.0.0:9120 would expose a plain HTTP panel to your whole network.
+      - "127.0.0.1:9120:9120"
+    volumes:
+      # Your Hermes data: profiles, config, state.db, logs. Add :ro for a view-only panel
+      # (listing, usage, insights and search keep working, actions that write will refuse).
+      - "${HOME}/.hermes:/home/herman/.hermes"
+      # Keep the panel token and pid across container restarts.
+      - herman-cache:/home/herman/.cache/herman
+      # Optional: your own model catalog, if you keep one.
+      # - "${HOME}/.local/share/herman/models-local.json:/home/herman/.local/share/herman/models-local.json:ro"
+    environment:
+      - HERMES_HOME=/home/herman/.hermes
+      - TZ=${TZ:-UTC}
+
+volumes:
+  herman-cache:

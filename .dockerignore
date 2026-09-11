@@ -1,0 +1,13 @@
+# Never ship operator data or a local install into the image.
+.git
+.gitignore
+models-local.json
+models-paas.json
+*.db
+*.db-wal
+*.db-shm
+**/history-backups/
+*.log
+__pycache__/
+.venv/
+venv/

@@ -109,6 +109,33 @@ destructive actions ask you to type the project name. Usage and insights are rea
 `state.db`. The Hermes dashboard (chat, config, keys, MCP, webhooks) stays at `hermes dashboard`,
 port 9119.
 
+## Docker
+
+For any OS with Docker (Linux, macOS, Windows with Docker Desktop). The image contains Hermes and
+herman; your Hermes data comes from the host mount, so the panel shows your own projects.
+
+```sh
+docker compose up --build                      # panel at http://127.0.0.1:9120
+docker compose exec herman herman web --url    # the URL including its access token
+docker compose exec herman herman -l           # the CLI inside the container
+```
+
+Without Compose:
+
+```sh
+docker build -t herman .
+docker run --rm -v "$HOME/.hermes:/home/herman/.hermes" -p 127.0.0.1:9120:9120 herman
+docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
+```
+
+- the port mapping keeps the panel on your machine; publish it on `0.0.0.0` only behind a reverse
+  proxy with TLS, since the panel itself speaks plain HTTP
+- mount `~/.hermes` read-only (add `:ro`) for a view-only panel: listing, usage, insights and search
+  keep working, actions that write will refuse
+- `Enter session` and the terminal window need a desktop, so run those from the host CLI
+- the engine version inside the image can drift from your host install:
+  `docker build --build-arg HERMES_BRANCH=<branch> -t herman .` pins it
+
 ## It adapts to your Hermes
 
 herman has no provider settings of its own. Per project it reads `config.yaml` (model, provider,

@@ -1673,7 +1673,7 @@ def list_panels() -> list[dict]:
             continue
         if pid and _pid_alive(pid):
             out.append({"pid": pid, "port": port, "host": host,
-                        "url": f"http://{url_host(host)}:{port}/", "file": f})
+                        "url": f"http://{url_host(display_host(host))}:{port}/", "file": f})
         else:
             f.unlink(missing_ok=True)
     return out
@@ -1758,6 +1758,18 @@ def html_path() -> Path:
         if c.exists():
             return c
     return candidates[0]
+
+
+def display_host(host: str) -> str:
+    """A browsable host for a bind address.
+
+    `0.0.0.0` and `::` are bind addresses, not destinations: printing `http://0.0.0.0:9120/` gives a
+    link nothing can open (it matters in a container, where binding a wildcard is the only way a
+    published port reaches the panel). The URL shows loopback instead, and the amber warning already
+    says the panel is reachable from the network.
+    """
+    name = (host or "").strip()
+    return "127.0.0.1" if name in ("", "0.0.0.0", "::") else name
 
 
 def url_host(host: str) -> str:
@@ -2341,12 +2353,13 @@ def cmd_web(argv: list[str]):
                            | {f"http://{h}" for h in allowed_hosts})
     HERMAN_CACHE.mkdir(parents=True, exist_ok=True)
     pid_file = pid_file_for(port)
-    pid_file.write_text(json.dumps({"pid": os.getpid(), "port": port, "host": host}),
+    pid_file.write_text(json.dumps({"pid": os.getpid(), "port": port,
+                                    "host": display_host(host), "bind": host}),
                         encoding="utf-8")
     chmod_quiet(pid_file)
-    url = f"http://{url_host(host)}:{port}/?t={token}"
-    print_panel_ready({"pid": os.getpid(), "port": port, "host": host,
-                       "url": f"http://{url_host(host)}:{port}/", "file": pid_file})
+    url = f"http://{url_host(display_host(host))}:{port}/?t={token}"
+    print_panel_ready({"pid": os.getpid(), "port": port, "host": display_host(host),
+                       "url": f"http://{url_host(display_host(host))}:{port}/", "file": pid_file})
     sys.stdout.flush()
     if open_browser:
         try:
