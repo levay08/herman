@@ -146,6 +146,24 @@ docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
 - `gateway: down` on a project: no messaging gateway (Telegram, Discord, ...) runs for it. Harmless.
 - A session is stuck: `herman kill <project>`, or `herman kill <project> <session-id>`.
 
+## Keeping your data out of the history
+
+herman keeps everything it knows about you outside this repository: profiles and sessions live in
+`~/.hermes`, while the panel token, the pid file and your project descriptions live in
+`~/.cache/herman/`. Nothing user-owned is ever written into the working tree, and `.gitignore`
+covers the runtime files a stray copy could drop there.
+
+The release gate is `preflight.py`: it scans the files you are about to publish for personal paths,
+hosts, secrets, session ids, **your own project descriptions** and the panel token, and exits 1 on
+anything blocking. Install it as a git hook so it runs on every commit:
+
+```sh
+python3 preflight.py --install-hook .        # writes .git/hooks/pre-commit
+```
+
+The hook scans what you staged and refuses the commit, so a description you typed in the panel (or
+any other operator data) cannot reach your history by accident.
+
 ## Uninstall
 
 ```sh

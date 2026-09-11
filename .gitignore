@@ -7,3 +7,6 @@ models-paas.json
 history-backups/
 *.log
 __pycache__/
+state.json
+skill-backups/
+*.tar.gz
