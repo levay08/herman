@@ -412,6 +412,10 @@
                     font-weight:650}
   .focus-row #focus.is-active{background:var(--focus-bg);border-color:var(--focus-line);
                               box-shadow:0 0 0 3px var(--focus-halo)}
+  .desc-tools{display:flex;gap:4px;align-items:center;flex:0 0 auto}
+  .desc-edit[hidden]{display:none}
+  .desc-edit.desc-cancel{background:var(--danger-soft);border-color:var(--danger-line);
+                         color:var(--danger)}
   #focus-tag{flex:0 0 auto;white-space:nowrap}
   #focus-tag[hidden]{display:none}
 
@@ -2741,8 +2745,17 @@ function card(p){
   dbtn.textContent = '✎';
   dbtn.title = 'Edit the description of ' + p.name + ' (a short note shown on the card).';
   dbtn.setAttribute('aria-label', 'Edit the description of ' + p.name);
-  dbtn.onclick = ev => { ev.stopPropagation(); descEdit(p.name, desc, dv, dbtn); };
-  desc.append(dv, dbtn);
+  dbtn.onclick = ev => { ev.stopPropagation(); descEdit(p.name, desc, dv, dbtn, dcan); };
+  const dcan = document.createElement('button');
+  dcan.className = 'desc-edit desc-cancel';
+  dcan.textContent = '✕';
+  dcan.hidden = true;
+  dcan.title = 'Cancel this edit without saving (Escape does the same).';
+  dcan.setAttribute('aria-label', 'Cancel the description edit of ' + p.name);
+  const dtools = document.createElement('span');
+  dtools.className = 'desc-tools';
+  dtools.append(dbtn, dcan);
+  desc.append(dv, dtools);
   el.appendChild(desc);
 
   const home = document.createElement('div');
@@ -3247,9 +3260,11 @@ function closeCreateModal(){ closeModal('create-modal'); }
 async function createProjectDialog(){
   if (await createProjectFrom('newname-m', 'newmode-m', 'newdesc-m')) closeCreateModal();
 }
-function descEdit(name, wrap, span, btn){
-  /* Pencil -> input + a ✓ that saves (Enter saves, Escape cancels). The button only shows while the
-     pointer is over the card, so the description reads as plain text the rest of the time. */
+function descEdit(name, wrap, span, btn, cancel){
+  /* Pencil -> input, with a ✓ that saves and a ✕ that cancels (Enter saves, Escape cancels). Both
+     buttons only show while the pointer is over the card, so the description reads as plain text the
+     rest of the time. `finish()` puts every handler back, otherwise the next pencil click would call
+     the previous, already-finished closure and the card would need a page reload to edit again. */
   if (wrap.classList.contains('editing')) return;
   wrap.classList.add('editing');
   const input = document.createElement('input');
@@ -3257,11 +3272,15 @@ function descEdit(name, wrap, span, btn){
   input.maxLength = 90;
   input.value = span.classList.contains('empty') ? '' : span.textContent;
   input.placeholder = 'short note (max 90 characters)';
-  input.title = 'Enter or the ✓ saves this description; Escape cancels.';
+  input.title = 'Enter or the ✓ saves this description; Escape or the ✕ cancels.';
   span.replaceWith(input);
   btn.textContent = '✓';
   btn.classList.add('saving');
   btn.title = 'Save this description (Enter does the same).';
+  if (cancel){
+    cancel.hidden = false;
+    cancel.onclick = ev => { ev.stopPropagation(); finish(false); };
+  }
   input.focus();
   input.select();
   let done = false;
@@ -3281,6 +3300,8 @@ function descEdit(name, wrap, span, btn){
     btn.textContent = '✎';
     btn.classList.remove('saving');
     btn.title = 'Edit the description of ' + name + ' (a short note shown on the card).';
+    btn.onclick = ev => { ev.stopPropagation(); descEdit(name, wrap, span, btn, cancel); };
+    if (cancel){ cancel.hidden = true; cancel.onclick = null; }
     wrap.classList.remove('editing');
   };
   input.addEventListener('keydown', e => {
