@@ -300,6 +300,36 @@
   .proj{padding:var(--s4) var(--s4) var(--s3);display:flex;flex-direction:column;gap:10px;
         height:100%;overflow:hidden}
   .proj .proj-actions{margin-top:auto}
+  /* Project description: two clamped lines so every card in a row keeps the same height, with the
+     pencil (and the ✓ while editing) showing only on hover or keyboard focus. */
+  /* ---------- skills / tools / SOUL.md (Model board) ---------- */
+  .soul{width:100%;min-height:280px;font-family:var(--mono);font-size:12.4px;line-height:1.5;
+        color:var(--text);background:var(--surface2);border:1px solid var(--line);
+        border-radius:var(--r-ctl);padding:10px 12px;resize:vertical;margin:var(--s2) 0 0}
+  #tools-list .subhead{margin-top:var(--s4)}
+  .toolrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;
+           padding:6px 10px;border:1px solid var(--line2);border-radius:var(--r-ctl);
+           background:var(--surface2);margin-bottom:6px}
+  .toolrow.off{opacity:.75}
+  .toolrow .mid{display:flex;align-items:baseline;gap:8px;min-width:0}
+  .toolrow .tn{font-family:var(--mono);font-size:12.4px;font-weight:650;flex:0 0 auto}
+  .toolrow .tl{color:var(--dim);font-size:11.6px;min-width:0;overflow:hidden;
+               text-overflow:ellipsis;white-space:nowrap}
+  .toolrow .dot.on{background:var(--ok)}
+  .toolrow .dot.off{background:var(--dot-off)}
+  .sksrc{color:var(--dim2);font-size:11.6px}
+  .proj-desc{display:flex;align-items:center;gap:6px;min-height:32px;font-size:12.2px}
+  .proj-desc .v{flex:1 1 auto;min-width:0;color:var(--dim);display:-webkit-box;
+                -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3}
+  .proj-desc .v.empty{color:var(--dim2);font-style:italic}
+  .desc-edit{flex:0 0 auto;opacity:0;pointer-events:none;transition:opacity .12s ease;background:var(--surface3);
+             border:1px solid var(--line);color:var(--dim);border-radius:var(--r-pill);
+             width:22px;height:22px;min-height:22px;padding:0;font-size:11px;line-height:1;
+             cursor:pointer}
+  .proj:hover .desc-edit,.proj:focus-within .desc-edit,.proj-desc.editing .desc-edit{opacity:1;
+                                                                                     pointer-events:auto}
+  .desc-edit.saving{background:var(--teal-soft);border-color:var(--teal-line);color:var(--teal-dark)}
+  .desc-input{font-size:12.2px;min-height:30px;padding:4px 8px;width:100%}
   .sess-head{font-size:12.3px;color:var(--dim)}
   .sess-line{font-size:12.1px;color:var(--dim2);margin-top:2px;overflow-wrap:anywhere}
   .proj-home{display:flex;align-items:baseline;gap:7px;margin-top:6px;font-size:12.2px;min-width:0}
@@ -637,6 +667,10 @@
                     <option value="clone-all">Full copy of the active project</option>
                   </select>
                 </div>
+                <div>
+                  <label class="f" for="newdesc">Description (optional)</label>
+                  <input id="newdesc" maxlength="90" placeholder="short note on the card" autocomplete="off">
+                </div>
                 <button class="primary" onclick="createProject()" title="herman -p <name> · progress shows in the output panel.">Create project</button>
               </div>
             </div>
@@ -646,8 +680,11 @@
 
       <section class="view" id="view-model">
         <div class="subtabs">
-          <button class="subtab active" data-sub="current" onclick="vtab('model','current')">Current model</button>
-          <button class="subtab" data-sub="change" onclick="vtab('model','change')">Change model</button>
+          <button class="subtab active" data-sub="current" onclick="modelTab('current')">Current model</button>
+          <button class="subtab" data-sub="change" onclick="modelTab('change')">Change model</button>
+          <button class="subtab" data-sub="skills" onclick="modelTab('skills')">Skills</button>
+          <button class="subtab" data-sub="tools" onclick="modelTab('tools')">Tools</button>
+          <button class="subtab" data-sub="soul" onclick="modelTab('soul')">SOUL.md</button>
         </div>
         <p class="note">The model lives in the project's Hermes config (<code>model.default</code>, <code>model.provider</code>), so Hermes itself picks it up: new sessions of this project use what you set here.</p>
 
@@ -685,9 +722,45 @@
             </div>
           </div>
         </div>
-      </section>
 
       
+
+        <div class="subpane" data-sub="skills">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Installed skills</div>
+            <div class="row">
+              <div>
+                <label class="f" for="skill-filter">Find a skill</label>
+                <input id="skill-filter" placeholder="filter by name, category or source" autocomplete="off" oninput="renderSkills()">
+              </div>
+              <button class="ghost" onclick="loadSkills()" title="Ask Hermes for the installed skill list again.">Reload list</button>
+            </div>
+            <p class="hint" id="skills-note">…</p>
+            <div class="scrollx"><table id="skills-table"></table></div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="tools">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Toolsets</div>
+            <p class="hint" id="tools-note">…</p>
+            <div id="tools-list"></div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="soul">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">SOUL.md</div>
+            <p class="hint" id="soul-note">…</p>
+            <textarea id="soul-text" class="soul" spellcheck="false" aria-label="SOUL.md content"></textarea>
+            <div class="btnrow">
+              <button class="primary" onclick="saveSoul()" title="Writes SOUL.md for the focus project. A timestamped copy of the old file stays next to it.">Save SOUL.md</button>
+              <button class="ghost" onclick="loadSoul()" title="Read the file from disk again, discarding unsaved edits.">Reload file</button>
+              <span class="hint" id="soul-status"></span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="view" id="view-insights">
         <div class="subtabs">
@@ -1066,6 +1139,10 @@
               <option value="clone-all">Full copy of the active project</option>
             </select>
           </div>
+          <div>
+            <label class="f" for="newdesc-m">Description (optional)</label>
+            <input id="newdesc-m" maxlength="90" placeholder="short note on the card" autocomplete="off">
+          </div>
         </div>
         <div class="btnrow modal-actions">
           <button class="primary" onclick="createProjectDialog()" title="herman -p <name> · progress shows in the output panel.">Create project</button>
@@ -1246,7 +1323,7 @@ function finishStream(){
 const TITLES = {
   dashboard: ['Dashboard', 'Overview of your Hermes projects'],
   projects: ['Projects', 'One card per Hermes profile'],
-  model: ['Model', 'Which AI model this project uses'],
+  model: ['Model', 'Model, skills, tools and SOUL.md of the focus project'],
   insights: ['Insights', 'Token usage, history search, activity, tools and health of the focus project'],
   access: ['Access', 'Keys, hosts, credentials and connections of the focus project'],
   maintenance: ['Maintenance', 'Health, backups and housekeeping']
@@ -1264,6 +1341,7 @@ function navigate(route){
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('on', el.id === 'view-' + r));
   document.querySelectorAll('.navlink').forEach(b => b.classList.toggle('active', b.dataset.route === r));
   vtabRestore(r);
+  if (r === 'model') loadModelTab();      // skills/tools/SOUL.md load when their tab shows
   document.getElementById('view-title').textContent = TITLES[r][0];
   document.getElementById('view-sub').textContent = TITLES[r][1];
   if (location.hash !== '#/' + r) history.replaceState(null, '', '#/' + r);
@@ -1278,6 +1356,7 @@ function onFocusChange(){
   markFocusField();                   // loadFocus() already stored the new focus synchronously
   loadUsage();                        // usage + insights are per project too
   loadInsights();
+  loadModelTabIfVisible();            // skills, tools and SOUL.md belong to the focus project as well
   activateProject(document.getElementById('focus').value);
 }
 async function activateProject(name){
@@ -1474,6 +1553,184 @@ function kv(id, rows){
 }
 let modelCatalog = [], modelCurrent = '', modelProvider = '';
 
+/* ---------- Model board: skills, tools and SOUL.md of the focus project ---------- */
+const MODEL_TABS = {current: () => {}, change: () => {}, skills: () => loadSkills(),
+                    tools: () => loadTools(), soul: () => loadSoul()};
+function modelTab(key){
+  vtab('model', key);
+  const load = MODEL_TABS[key];
+  if (load) load();                 // each tab pulls its own data, so nothing is fetched unseen
+}
+function modelTabActive(){
+  const p = document.querySelector('#view-model .subpane.on');
+  return p ? p.dataset.sub : 'current';
+}
+function loadModelTab(){
+  const load = MODEL_TABS[modelTabActive()];
+  if (load) load();
+}
+function loadModelTabIfVisible(){
+  const v = document.getElementById('view-model');
+  if (v && v.classList.contains('on')) loadModelTab();
+}
+let skillData = null, toolData = null;
+async function loadSkills(){
+  if (!document.getElementById('skills-table')) return;
+  setHint('skills-note', 'reading the installed skills of ' + focusProject + '…');
+  try {
+    skillData = await (await fetch(`/api/skills?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)).json();
+  } catch (e){ setHint('skills-note', 'could not read the skill list'); return; }
+  renderSkills();
+}
+function renderSkills(){
+  const d = skillData;
+  if (!d || d.error){ setHint('skills-note', 'skill list unavailable' + (d && d.error ? ': ' + d.error : '')); return; }
+  const f = document.getElementById('skill-filter');
+  const q = (f && f.value || '').toLowerCase().trim();
+  const rows = (d.rows || []).filter(r => !q ||
+    (r.name + ' ' + r.category + ' ' + r.source + ' ' + r.status).toLowerCase().includes(q));
+  setHint('skills-note', rows.length + ' of ' + d.count + ' skills in ' + d.project
+    + ' · listed through `hermes skills list`, so this is what the agent really loads.'
+    + ' A local skill is removed by herman itself (the folder is archived into'
+    + ' ~/.cache/herman/skill-backups/ first), a hub-installed one through `hermes skills uninstall`;'
+    + ' builtin skills live in the install tree and cannot be deleted from here (' + (d.home || '<profile>/skills') + ').');
+  table('skills-table', ['Skill', 'Category', 'Source', 'Trust', 'Status', ''],
+    rows.map(r => [r.name, r.category || '-', r.source, r.trust, r.status,
+      r.source === 'hub' ? {node: uninstallSkillBtn(r.name)}
+        : (r.source === 'local' ? {node: removeSkillBtn(r.name)} : {node: document.createTextNode('-')})]),
+    'No skills installed in this project yet.');
+}
+function uninstallSkillBtn(name){
+  const b = document.createElement('button');
+  b.className = 'tiny ghost';
+  b.textContent = 'Uninstall';
+  b.title = 'hermes skills uninstall ' + name + ' --yes · asks you to type the project name first.';
+  b.onclick = async () => {
+    const nm = typeToConfirm('Uninstall the skill "' + name + '"?', focusProject,
+      {note: 'Runs `hermes skills uninstall ' + name + ' --yes` for ' + focusProject
+           + '. The skill folder is deleted from that profile; nothing else changes.'});
+    if (!nm) return;
+    setStatus('busy', 'uninstalling ' + name + '…');
+    const d = await postJson('/api/uninstall-skill', {name: nm, item: name});
+    if (!d.ok){ setStatus('error', d.error || 'could not uninstall ' + name); say('✗ ' + (d.error || d.output)); return; }
+    setStatus('ok', name + ' uninstalled');
+    if (d.output) say(d.output);
+    await loadSkills();
+  };
+  return b;
+}
+function removeSkillBtn(name){
+  const b = document.createElement('button');
+  b.className = 'tiny ghost';
+  b.textContent = 'Remove';
+  b.title = 'Delete this local skill folder. herman archives it to ~/.cache/herman/skill-backups/ first.'
+          + ' Asks you to type the project name.';
+  b.onclick = async () => {
+    const nm = typeToConfirm('Remove the local skill "' + name + '"?', focusProject,
+      {note: 'herman writes a tarball of the folder into ~/.cache/herman/skill-backups/ and then'
+           + ' deletes it from this profile. Builtin and hub-installed skills are never removed here.'});
+    if (!nm) return;
+    setStatus('busy', 'removing ' + name + '…');
+    const d = await postJson('/api/remove-skill', {name: nm, item: name});
+    if (!d.ok){ setStatus('error', d.error || 'could not remove ' + name); say('✗ ' + (d.error || name)); return; }
+    setStatus('ok', name + ' removed · archived as ' + (d.backup || '-'));
+    say('✓ ' + name + ' archived as ' + (d.backup || '-') + ' and removed from ' + nm);
+    await loadSkills();
+  };
+  return b;
+}
+async function loadTools(){
+  if (!document.getElementById('tools-list')) return;
+  setHint('tools-note', 'reading the toolsets of ' + focusProject + '…');
+  try {
+    toolData = await (await fetch(`/api/tools?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)).json();
+  } catch (e){ setHint('tools-note', 'could not read the tool list'); return; }
+  renderTools();
+}
+function renderTools(){
+  const el = document.getElementById('tools-list');
+  const d = toolData;
+  if (!el) return;
+  if (!d || d.error){ setHint('tools-note', 'tool list unavailable' + (d && d.error ? ': ' + d.error : '')); return; }
+  el.textContent = '';
+  setHint('tools-note', d.count + ' toolsets for ' + d.project
+    + ' · a toggle runs `hermes tools enable|disable <name>` and lands in the NEXT session:'
+    + ' Hermes keeps a running conversation\'s prompt cache intact on purpose.');
+  (d.sections || []).forEach(sec => {
+    const h = document.createElement('div');
+    h.className = 'subhead';
+    h.textContent = sec.title + ' · ' + sec.tools.length;
+    el.appendChild(h);
+    sec.tools.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'toolrow' + (t.enabled ? '' : ' off');
+      const dot = document.createElement('span');
+      dot.className = 'dot ' + (t.enabled ? 'on' : 'off');
+      dot.title = t.enabled ? 'enabled' : 'disabled';
+      const mid = document.createElement('span');
+      mid.className = 'mid';
+      const nm = document.createElement('span'); nm.className = 'tn'; nm.textContent = t.name;
+      const lb = document.createElement('span'); lb.className = 'tl'; lb.textContent = t.label || '';
+      lb.title = t.label || '';
+      mid.append(nm, lb);
+      const btn = document.createElement('button');
+      btn.className = 'tiny ' + (t.enabled ? 'ghost' : 'primary');
+      btn.textContent = t.enabled ? 'Disable' : 'Enable';
+      btn.title = 'hermes tools ' + (t.enabled ? 'disable' : 'enable') + ' ' + t.name
+        + ' for ' + d.project + ' (takes effect in the next session).';
+      btn.onclick = () => toggleTool(t.name, !t.enabled);
+      row.append(dot, mid, btn);
+      el.appendChild(row);
+    });
+  });
+}
+async function toggleTool(name, enable){
+  setHint('tools-note', (enable ? 'enabling ' : 'disabling ') + name + '…');
+  const d = await postJson('/api/tool-toggle',
+    {name: focusProject, item: name, enabled: enable ? '1' : '0'});
+  if (!d.ok){
+    setStatus('error', d.error || 'could not change the toolset');
+    setHint('tools-note', d.error || 'could not change the toolset');
+    return;
+  }
+  setStatus('ok', (enable ? 'enabled ' : 'disabled ') + name + ' · next session');
+  await loadTools();
+}
+async function loadSoul(){
+  if (!document.getElementById('soul-text')) return;
+  setHint('soul-note', 'reading SOUL.md of ' + focusProject + '…');
+  try {
+    renderSoul(await (await fetch(`/api/soul?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)).json());
+  } catch (e){ setHint('soul-note', 'could not read SOUL.md'); }
+}
+function renderSoul(d){
+  if (!d || d.error){ setHint('soul-note', 'SOUL.md unavailable' + (d && d.error ? ': ' + d.error : '')); return; }
+  const ta = document.getElementById('soul-text');
+  if (ta) ta.value = d.text || '';
+  setHint('soul-note', (d.exists ? 'SOUL.md of ' + d.project + ' · ' + d.size + ' bytes'
+                                 : 'no SOUL.md yet for ' + d.project + ' (saving creates it)')
+    + ' · ' + d.path
+    + ' · identity slot #1 in the system prompt; Hermes scans it and blocks the whole file when it'
+    + ' matches a prompt-injection pattern.'
+    + (d.backups ? ' ' + d.backups + ' herman backup(s) sit next to it.' : '')
+    + (d.truncated ? ' Shown truncated: edit it in a terminal to see the rest.' : ''));
+  setHint('soul-status', '');
+}
+async function saveSoul(){
+  const ta = document.getElementById('soul-text');
+  if (!ta) return;
+  setHint('soul-status', 'saving…');
+  const d = await postJson('/api/soul-save', {name: focusProject, text: ta.value});
+  if (!d.ok){
+    setHint('soul-status', d.error || 'could not save SOUL.md');
+    setStatus('error', 'SOUL.md not saved');
+    return;
+  }
+  const msg = 'saved · ' + d.size + ' bytes' + (d.backup ? ' · old file kept as ' + d.backup : '');
+  setStatus('ok', 'SOUL.md saved for ' + focusProject);
+  await loadSoul();
+  setHint('soul-status', msg);      // survives the reload: renderSoul() clears it for a plain Reload
+}
 function renderModels(){
   const sel = document.getElementById('model-name');
   if (!sel) return;
@@ -2462,23 +2719,31 @@ function card(p){
   head.appendChild(tag('gateway ' + p.gateway, p.gateway === 'up' ? 'ok' : 'warn'));
   const liveNow = p.sessions || [];
   if (liveNow.length){
+    /* Just the marker on the card: stopping a session is a modal action (Details), so a stray
+       click on the front of a card can never interrupt a running turn. */
     const run = document.createElement('span');
     run.className = 'proj-run';
     run.textContent = 'session: ' + liveNow.length;
-    run.title = 'A session is running here · ' + sessTip(liveNow);
-    const kill = document.createElement('button');
-    kill.className = 'sess-kill';
-    kill.textContent = '-';
-    kill.title = 'herman kill ' + p.name + ' · stop ' + liveNow.length
-      + ' running session(s) for this project (Ctrl+C style: interrupt, then terminate, then kill). Asks first.';
-    kill.setAttribute('aria-label', 'Stop the running sessions of ' + p.name);
-    kill.onclick = ev => { ev.stopPropagation(); killProjectSessions(p.name, liveNow.length); };
-    const wrap = document.createElement('span');
-    wrap.className = 'sess-mark';
-    wrap.append(run, kill);
-    head.appendChild(wrap);
+    run.title = 'A session is running here · ' + sessTip(liveNow)
+      + '   (open Details to stop it)';
+    head.appendChild(run);
   }
   el.appendChild(head);
+
+  const desc = document.createElement('div');
+  desc.className = 'proj-desc';
+  const dv = document.createElement('span');
+  dv.className = 'v' + (p.description ? '' : ' empty');
+  dv.textContent = p.description || 'no description yet';
+  dv.title = p.description || '';
+  const dbtn = document.createElement('button');
+  dbtn.className = 'desc-edit';
+  dbtn.textContent = '✎';
+  dbtn.title = 'Edit the description of ' + p.name + ' (a short note shown on the card).';
+  dbtn.setAttribute('aria-label', 'Edit the description of ' + p.name);
+  dbtn.onclick = ev => { ev.stopPropagation(); descEdit(p.name, desc, dv, dbtn); };
+  desc.append(dv, dbtn);
+  el.appendChild(desc);
 
   const home = document.createElement('div');
   home.className = 'proj-home';
@@ -2937,25 +3202,92 @@ document.addEventListener('keydown', e => {
 /* ---------- action helpers ---------- */
 /* One implementation for both entry points: the framed form on the Projects board and the dialog
    opened from the header. Keep the ids distinct or getElementById picks the wrong field. */
-function createProjectFrom(nameId, modeId){
+async function postJson(path, body){
+  /* Every panel write carries the token twice (query for the cookie-less path, header for scripts)
+     and the payload in the body, never in a URL that could end up in a log. */
+  try {
+    const r = await fetch(path + '?t=' + encodeURIComponent(TOKEN), {
+      method: 'POST', headers: {'X-Herman-Token': TOKEN, 'Content-Type': 'application/json'},
+      body: JSON.stringify(body)});
+    const d = await r.json().catch(() => ({ok: false, error: r.status + ' ' + r.statusText}));
+    return d;
+  } catch (e){ return {ok: false, error: String(e)}; }
+}
+async function saveDesc(name, text){
+  /* One request for one fact: the description lives in herman's own state, so no hermes config key
+     is invented for it. Returns the stored text, or null when the panel refused it. */
+  const d = await postJson('/api/describe', {name: name, text: text});
+  if (!d.ok){ setStatus('error', d.error || 'could not save the description'); return null; }
+  return d.description || '';
+}
+async function createProjectFrom(nameId, modeId, descId){
   const field = document.getElementById(nameId);
   const name = (field && field.value || '').trim().toLowerCase();
   if (!name){ setStatus('error', 'Enter a project name first.'); return false; }
   const mode = document.getElementById(modeId).value;
   const extra = mode === 'clean' ? {'--no-skills': 1} : (mode === 'clone' ? {'--clone': 1} : {'--clone-all': 1});
+  const dEl = descId ? document.getElementById(descId) : null;
+  const desc = dEl ? (dEl.value || '').trim() : '';
   field.value = '';
-  run('create', name, extra);
-  return true;
+  const res = await run('create', name, extra);
+  if (res && res.ok){
+    if (desc) await saveDesc(name, desc);
+    if (dEl) dEl.value = '';
+    await refresh();
+  }
+  return !!(res && res.ok);
 }
-function createProject(){ createProjectFrom('newname', 'newmode'); }
+function createProject(){ createProjectFrom('newname', 'newmode', 'newdesc'); }
 function openCreateModal(){
   openModal('create-modal');
   const f = document.getElementById('newname-m');
   if (f) f.focus();
 }
 function closeCreateModal(){ closeModal('create-modal'); }
-function createProjectDialog(){
-  if (createProjectFrom('newname-m', 'newmode-m')) closeCreateModal();
+async function createProjectDialog(){
+  if (await createProjectFrom('newname-m', 'newmode-m', 'newdesc-m')) closeCreateModal();
+}
+function descEdit(name, wrap, span, btn){
+  /* Pencil -> input + a ✓ that saves (Enter saves, Escape cancels). The button only shows while the
+     pointer is over the card, so the description reads as plain text the rest of the time. */
+  if (wrap.classList.contains('editing')) return;
+  wrap.classList.add('editing');
+  const input = document.createElement('input');
+  input.className = 'desc-input';
+  input.maxLength = 90;
+  input.value = span.classList.contains('empty') ? '' : span.textContent;
+  input.placeholder = 'short note (max 90 characters)';
+  input.title = 'Enter or the ✓ saves this description; Escape cancels.';
+  span.replaceWith(input);
+  btn.textContent = '✓';
+  btn.classList.add('saving');
+  btn.title = 'Save this description (Enter does the same).';
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    if (save){
+      const stored = await saveDesc(name, input.value.trim());
+      if (stored === null){ done = false; input.focus(); return; }   // stay in edit mode, nothing lost
+      span.textContent = stored || 'no description yet';
+      span.className = 'v' + (stored ? '' : ' empty');
+      span.title = stored || '';
+      const p = projects.find(x => x.name === name);
+      if (p) p.description = stored || '';
+    }
+    input.replaceWith(span);
+    btn.textContent = '✎';
+    btn.classList.remove('saving');
+    btn.title = 'Edit the description of ' + name + ' (a short note shown on the card).';
+    wrap.classList.remove('editing');
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape'){ e.preventDefault(); finish(false); }
+  });
+  btn.onclick = ev => { ev.stopPropagation(); finish(true); };
 }
 function removeProject(name){
   if (!name){ setStatus('error', 'Pick a focus project first.'); return; }
