@@ -52,6 +52,11 @@ ALLOW = [
     r'class="[^"]*\bhero\b', r"\.hero\b", r"--hero-", r"hero-",
     r"/home/(?:me|you|user|someone)\b", r"~/Projects",
     r"/home/herman\b",            # the unprivileged user inside the published container image
+    # Public API hosts herman ships on purpose in its endpoint picker: vendor-run, documented
+    # addresses, so they are product data and not operator data. The provider-domain rule keeps its
+    # teeth for everything else (a private aggregator, a self-hosted gateway), and the operator's own
+    # free text is covered by operator_strings().
+    r"api\.openai\.com", r"openrouter\.ai", r"anthropic\.com", r"ai\.paas\.id",
 ]
 
 

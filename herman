@@ -32,6 +32,7 @@ import traceback
 import secrets
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -1110,6 +1111,10 @@ command; the engine stays the Hermes you already have.
   {PROG} history [name] --delete-all                     drop the whole history of the project
      add --dry-run to preview, or -y to skip the typed confirmation (a backup is always written first)
   {PROG} model [name] --list [--refresh]     models the configured endpoint offers
+  {PROG} model [name] --endpoints            every endpoint (base_url) you can pick from
+  {PROG} model [name] --endpoint <key|url>   switch this project's model.base_url
+  {PROG} model [name] --endpoint default     drop base_url, back to the provider default
+  {PROG} model [name] --probe [key|url]      test an endpoint, write nothing
   {PROG} model [name] --set <id> [--provider <p>]   change the model
   {PROG} git [name]                  git status of the project workdir
   {PROG} git <name> init             create a repository in the workdir
@@ -2307,6 +2312,9 @@ def cmd_web(argv: list[str]):
                 "remote_name": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
                 "helper": r"[A-Za-z0-9][A-Za-z0-9._ /-]{0,63}",
                 "gateway": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                "provider": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                # an endpoint is either a URL or the word `default` (drop model.base_url)
+                "target": r"(?:default|none)|[A-Za-z][A-Za-z0-9+.\-]{1,15}://[^\x00-\x1f]{1,380}",
             }
             free = ("value", "token", "password")     # secrets never reach argv
             for key, values in q.items():
@@ -2335,7 +2343,7 @@ def cmd_web(argv: list[str]):
                 "git-set-workdir", "git-set-user", "git-set-remote", "git-rm-remote",
                 "git-set-helper", "access-set-env", "access-unset-env", "access-new-key",
                 "access-revoke-key", "access-add-agent", "access-revoke-agent",
-                "access-gitcred-add", "access-gitcred-rm",
+                "access-gitcred-add", "access-gitcred-rm", "model-set-endpoint",
             }
             if action in mutating and method != "POST":
                 self._json({"error": f"'{action}' changes state: send it with POST"}, 405)
@@ -2357,9 +2365,11 @@ def cmd_web(argv: list[str]):
                 "list": lambda: ["-l"] + tail,
                 "cwd": lambda: ["-C", name] + ([cwd] if cwd else []) + tail,
                 "model": lambda: ["model", name] + tail,
-                "model-set": lambda: (["model", name, "--set", only("model")]
-                                      + (["--provider", only("provider")] if only("provider") else [])
-                                      + tail),
+                "model-set": lambda: (["model", name, "--set", only("model")] + tail),
+                "model-set-endpoint": lambda: (["model", name, "--endpoint", only("target")]
+                                               + (["--provider", only("provider")]
+                                                  if only("provider") else []) + tail),
+                "model-probe": lambda: (["model", name, "--probe", only("target")] + tail),
                 "git": lambda: ["git", name] + tail,
                 "access": lambda: ["access", name] + tail,
                 "sync": lambda: ["sync", "--fix"] + tail,
@@ -2389,7 +2399,8 @@ def cmd_web(argv: list[str]):
             # Secrets (API keys, tokens) reach the CLI through HERMAN_SECRET, never argv.
             secret_actions = ("access-set-env", "access-gitcred-add")
             if not name and action in ("git-init", "git-set-workdir", "git-set-user", "git-set-remote",
-                                       "git-rm-remote", "git-set-helper", "access-set-env"):
+                                       "git-rm-remote", "git-set-helper", "access-set-env",
+                                       "model-set", "model-set-endpoint", "model-probe"):
                 self._json({"error": "this action requires a project name"}, 400)
                 return
             confirm_targets = {
@@ -2543,6 +2554,401 @@ def open_terminal(name: str) -> bool:
 # ------------------------------------------------ model · git · access ---
 
 GIT = shutil.which("git")
+
+
+# --------------------------------------------- endpoint presets (model.base_url) ---
+
+# Public, documented API hosts a project can point `model.base_url` at, together with the Hermes
+# provider id that belongs with each one and the .env variable Hermes reads for its key ("" = the
+# endpoint needs none). The list is deliberately short: picking one is a convenience, typing any URL
+# stays possible, and `hermes model` remains the engine's own, longer provider list. `group` only
+# chooses the heading in the panel.
+ENDPOINT_GROUPS = (
+    ("provider", "Well-known providers"),
+    ("aggregator", "Aggregators and hubs"),
+    ("compat", "OpenAI-compatible APIs"),
+    ("local", "Local servers"),
+)
+
+# key, label, base_url, hermes provider, key variable, group, note
+ENDPOINT_PRESETS = (
+    ("paas", "paas.id AI Hub", "https://ai.paas.id", "custom", "", "aggregator",
+     "OpenAI-compatible hub: the key lives in model.api_key (Access -> API keys)"),
+    ("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openrouter", "OPENROUTER_API_KEY",
+     "aggregator", "one key, hundreds of models"),
+    ("huggingface", "Hugging Face router", "https://router.huggingface.co/v1", "huggingface",
+     "HF_TOKEN", "aggregator", "OpenAI-compatible router with a free tier"),
+    ("ai-gateway", "Vercel AI Gateway", "https://ai-gateway.vercel.sh/v1", "ai-gateway",
+     "AI_GATEWAY_API_KEY", "aggregator", ""),
+    ("opencode-zen", "OpenCode Zen", "https://opencode.ai/zen/v1", "opencode-zen",
+     "OPENCODE_ZEN_API_KEY", "aggregator", "some models answer on the Anthropic surface"),
+    ("nvidia", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1", "nvidia", "NVIDIA_API_KEY",
+     "aggregator", ""),
+    ("openai", "OpenAI", "https://api.openai.com/v1", "openai-api", "OPENAI_API_KEY",
+     "provider", ""),
+    ("anthropic", "Anthropic", "https://api.anthropic.com", "anthropic", "ANTHROPIC_API_KEY",
+     "provider", "native Messages API, not the OpenAI shape"),
+    ("gemini", "Google Gemini (OpenAI-compatible)",
+     "https://generativelanguage.googleapis.com/v1beta/openai", "gemini", "GEMINI_API_KEY",
+     "provider", "the OpenAI-compatible surface of the Gemini API"),
+    ("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek", "DEEPSEEK_API_KEY",
+     "provider", ""),
+    ("xai", "xAI Grok", "https://api.x.ai/v1", "xai", "XAI_API_KEY", "provider", ""),
+    ("zai", "Z.AI / GLM", "https://api.z.ai/api/paas/v4", "zai", "GLM_API_KEY", "provider", ""),
+    ("moonshot", "Kimi / Moonshot", "https://api.moonshot.ai/v1", "kimi-coding", "KIMI_API_KEY",
+     "provider", ""),
+    ("minimax", "MiniMax", "https://api.minimax.io/anthropic", "minimax", "MINIMAX_API_KEY",
+     "provider", "Anthropic-shaped endpoint"),
+    ("qwen", "Qwen Cloud (DashScope intl)",
+     "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "alibaba", "DASHSCOPE_API_KEY",
+     "provider", ""),
+    ("nous", "Nous Research (Portal)", "https://inference-api.nousresearch.com/v1", "nous", "",
+     "provider", "sign in with `hermes portal`; no plain API key"),
+    ("ollama-cloud", "Ollama Cloud", "https://ollama.com/v1", "ollama-cloud", "OLLAMA_API_KEY",
+     "provider", ""),
+    ("groq", "Groq", "https://api.groq.com/openai/v1", "custom", "GROQ_API_KEY", "compat",
+     "fast inference, OpenAI-compatible"),
+    ("together", "Together AI", "https://api.together.xyz/v1", "custom", "TOGETHER_API_KEY",
+     "compat", ""),
+    ("mistral", "Mistral", "https://api.mistral.ai/v1", "custom", "MISTRAL_API_KEY", "compat", ""),
+    ("fireworks", "Fireworks AI", "https://api.fireworks.ai/inference/v1", "custom",
+     "FIREWORKS_API_KEY", "compat", ""),
+    ("deepinfra", "DeepInfra", "https://api.deepinfra.com/v1/openai", "custom",
+     "DEEPINFRA_API_KEY", "compat", ""),
+    ("cerebras", "Cerebras", "https://api.cerebras.ai/v1", "custom", "CEREBRAS_API_KEY",
+     "compat", ""),
+    ("perplexity", "Perplexity", "https://api.perplexity.ai", "custom", "PERPLEXITY_API_KEY",
+     "compat", ""),
+    ("ollama", "Ollama (local)", "http://127.0.0.1:11434", "custom", "", "local",
+     "runs on this machine, no key"),
+    ("lmstudio", "LM Studio (local)", "http://127.0.0.1:1234/v1", "lmstudio", "", "local",
+     "runs on this machine, no key"),
+    ("vllm", "vLLM / llama.cpp (local)", "http://127.0.0.1:8000/v1", "custom", "", "local",
+     "runs on this machine, no key"),
+)
+
+
+def preset_rows() -> list[dict]:
+    """The preset table as JSON-ready rows the CLI and the panel both render."""
+    groups = dict(ENDPOINT_GROUPS)
+    out = []
+    for key, label, url, provider, key_env, group, note in ENDPOINT_PRESETS:
+        out.append({"key": key, "label": label, "url": url, "provider": provider,
+                    "key_env": key_env, "group": group,
+                    "group_label": groups.get(group, group), "note": note})
+    return out
+
+
+def preset_by_key(key: str) -> dict:
+    """One preset by its short key (lower case; unknown keys answer {})."""
+    want = (key or "").strip().lower()
+    if not want:
+        return {}
+    for row in preset_rows():
+        if row["key"] == want:
+            return row
+    return {}
+
+
+def preset_for_url(url: str) -> dict:
+    """The preset a URL belongs to, so a typed or edited URL still gets the right provider."""
+    want = normalize_endpoint(url).lower().rstrip("/")
+    if not want:
+        return {}
+    for row in preset_rows():
+        if normalize_endpoint(row["url"]).lower().rstrip("/") == want:
+            return row
+    return {}
+
+
+def normalize_endpoint(url: str) -> str:
+    """One spelling per endpoint: no surrounding space, one trailing slash at most, none at the end.
+
+    `model.base_url` is compared as a string in several places (the catalog cache is keyed by it,
+    the panel marks the current endpoint), so `https://host/v1/` and `https://host/v1` must not be
+    two different endpoints.
+    """
+    return re.sub(r"/+$", "", (url or "").strip())
+
+
+def endpoint_problem(url: str) -> str:
+    """Why this base_url cannot be written, or "" when Hermes can use it."""
+    u = normalize_endpoint(url)
+    if not u:
+        return "the endpoint is empty"
+    if len(u) > 300:
+        return "the endpoint is longer than 300 characters"
+    if any(ch.isspace() or ord(ch) < 32 for ch in u):
+        return "the endpoint must not contain spaces or control characters"
+    parts = urllib.parse.urlsplit(u)
+    if parts.scheme not in ("http", "https"):
+        return "the endpoint must start with http:// or https://"
+    if not parts.netloc:
+        return "the endpoint has no host"
+    if parts.query or parts.fragment:
+        return "the endpoint must not carry a query string or a fragment"
+    return ""
+
+
+def _env_value(path: Path, var: str) -> str:
+    """One variable out of an .env file, for TESTS only: the value is never printed anywhere."""
+    if not path.exists() or not var:
+        return ""
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() == var:
+                return v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def endpoint_key(name: str, base_url: str) -> str:
+    """The key to send to THIS endpoint, or "" when it needs none.
+
+    Three rules, in this order: a loopback server needs no key (and a project key must not travel to
+    one), `model.api_key` is sent only to the URL the project is CONFIGURED with and only when the
+    configured provider is one Hermes reads that key for (custom/openrouter), and a known provider
+    uses the .env variable its preset names. So a preset whose key sits in .env still reports
+    "reachable", and testing an unrelated host never ships the project's key.
+    """
+    provider, cfg_url, cfg_key = model_endpoint(name)
+    host = (urllib.parse.urlsplit(normalize_endpoint(base_url)).hostname or "").lower()
+    if host in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
+        return ""
+    if (cfg_key and provider.lower() in ("custom", "openrouter", "")
+            and (not base_url or normalize_endpoint(cfg_url) == normalize_endpoint(base_url))):
+        return cfg_key
+    preset = preset_for_url(base_url)
+    if preset.get("key_env"):
+        return _env_value(profile_home(name) / ".env", preset["key_env"])
+    return ""
+
+
+def _models_surface(base_url: str) -> list[str]:
+    """Candidate model-list URLs for one base_url, the most likely one first.
+
+    Both spellings are common in the wild: a host whose documented base already ends in a version
+    segment (OpenAI /v1, Gemini /openai, Z.AI /v4) answers at <base>/models, while the others
+    (a hub preset, DeepSeek, Ollama, Groq) answer at <base>/v1/models. herman used to append
+    "/v1/models" unconditionally, so half of the documented endpoints replied 404 with an empty
+    picker; the candidates are tried in order and the one that answers is remembered.
+    """
+    base = normalize_endpoint(base_url)
+    if base.endswith(("/v1", "/openai", "/v4")):
+        return [base + "/models", base + "/v1/models"]
+    return [base + "/v1/models", base + "/models"]
+
+
+def _models_request(url: str, key: str, timeout: int = 8) -> dict:
+    """One guarded GET against a candidate model-list URL: status, model ids and raw rows.
+
+    Never raises. Local servers take no key, so an empty key sends no Authorization header at all
+    (some of them reject a bogus one); Anthropic's Model API wants x-api-key instead of Bearer.
+    """
+    headers = {"Accept": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+        if "anthropic.com" in url:
+            headers["x-api-key"] = key
+            headers["anthropic-version"] = "2023-06-01"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            status = int(getattr(r, "status", 200) or 200)
+            payload = json.loads(r.read(2_000_000).decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "status": int(exc.code), "ids": [], "rows": [],
+                "error": f"HTTP {exc.code}"}
+    except Exception as exc:
+        return {"ok": False, "status": 0, "ids": [], "rows": [], "error": type(exc).__name__}
+    if isinstance(payload, dict):
+        items = (payload.get("data") or payload.get("models") or payload.get("model_list")
+                 or (payload if payload.get("object") == "list" else None))
+        if items is None:
+            return {"ok": False, "status": status, "ids": [], "rows": [],
+                    "error": "answered without a model list"}
+    else:
+        items = payload
+    if isinstance(items, dict):
+        items = list(items.values())
+    ids, rows = [], []
+    for it in items or []:
+        if isinstance(it, dict):
+            mid = it.get("id") or it.get("model") or it.get("name")
+            rows.append(it)
+        else:
+            mid = str(it)
+            rows.append({"id": mid})
+        if mid:
+            ids.append(str(mid))
+    return {"ok": bool(ids), "status": status, "ids": ids, "rows": rows[:500],
+            "error": "" if ids else "answered without a model list"}
+
+
+def probe_endpoint(base_url: str, key: str = "", *, timeout: int = 8) -> dict:
+    """Find and read one endpoint's model list. Always answers, never raises.
+
+    Shape: ``ok``, ``endpoint``, ``url`` (the path that answered), ``status``, ``count``,
+    ``sample``, ``rows``, ``needs_key``, ``error``, ``tried``. Without an API key a 401/403 still
+    means "the right endpoint, it wants a key", so it is reported that way instead of as a failure;
+    404 on every candidate means the base URL points at the wrong path.
+    """
+    base = normalize_endpoint(base_url)
+    tried: list[dict] = []
+    best: dict = {}
+    for path in _models_surface(base):
+        res = _models_request(path, key, timeout=timeout)
+        tried.append({"url": path, "status": res["status"], "models": len(res["ids"]),
+                      "error": res["error"]})
+        if res["ok"]:
+            return {"ok": True, "endpoint": base, "url": path, "status": res["status"],
+                    "count": len(res["ids"]), "sample": res["ids"][:8], "rows": res["rows"],
+                    "needs_key": False, "error": "", "tried": tried}
+        weak = best.get("status") in (None, 0, 404)
+        if not best or (weak and res["status"] in (401, 403)):
+            best = {"url": path, "status": res["status"], "error": res["error"]}
+    status = int(best.get("status") or 0)
+    paths = " and ".join(t["url"] for t in tried)
+    if status in (401, 403):
+        error = f"the endpoint answered {status}: it wants an API key for this project"
+    elif status == 404:
+        error = f"no model list at {paths}"
+    elif status:
+        error = f"the endpoint answered {status}: {best.get('error') or 'no model list'}"
+    else:
+        error = f"the endpoint did not answer ({best.get('error') or 'no response'})"
+    return {"ok": False, "endpoint": base, "url": str(best.get("url") or base), "status": status,
+            "count": 0, "sample": [], "rows": [], "needs_key": status in (401, 403),
+            "error": error, "tried": tried}
+
+
+def endpoint_report(name: str, base_url: str, key: str = "") -> dict:
+    """What the panel and the CLI show about one endpoint: reachable, which path, how many models."""
+    rep = probe_endpoint(base_url, key)
+    rep["project"] = name
+    rep["key_present"] = bool(key)
+    rep["preset"] = preset_for_url(base_url)
+    return rep
+
+
+def endpoint_lines(rep: dict, model: str = "") -> list[str]:
+    """The endpoint report as terminal lines (shared by `model --probe` and `--endpoint`)."""
+    lines = [f"endpoint : {rep.get('endpoint') or '-'}"]
+    if rep.get("ok"):
+        lines.append(f"models   : {rep['count']} from {rep['url']}")
+        if rep.get("sample"):
+            lines.append("examples : " + ", ".join(rep["sample"][:4]))
+    else:
+        lines.append(f"models   : none ({rep.get('error') or 'unknown error'})")
+    for t in rep.get("tried") or []:
+        note = f" · {t['models']} models" if t.get("models") else ""
+        if not t.get("models") and t.get("error"):
+            note = f" ({t['error']})"
+        lines.append(f"tried    : {t['url']} -> {t['status'] or 'no answer'}{note}")
+    if rep.get("key_present"):
+        lines.append("api key  : sent with the request")
+    else:
+        lines.append("api key  : none configured for this project")
+    if model and rep.get("ok"):
+        if str(model) in (rep.get("sample") or []) or any(
+                str(model) == str(r.get("id")) for r in (rep.get("rows") or [])):
+            lines.append(f"model    : '{model}' is offered here")
+        else:
+            lines.append(f"model    : '{model}' is NOT in this list (pick another model after "
+                         f"switching)")
+    return lines
+
+
+def do_endpoint(name: str, target: str, provider: str | None = None, *,
+                dry: bool = False) -> dict:
+    """Point one project at another endpoint: the ONLY writer of model.base_url.
+
+    `target` is a preset key, an http(s) URL, or `default` to drop the key and fall back to what
+    the configured provider ships. Every write goes through `hermes config set/unset`, so Hermes
+    itself sees exactly what the panel reports; afterwards the new endpoint is asked for its model
+    list at once, because a picker that quietly keeps serving the old list is worse than a failure.
+    """
+    ensure_profile(name)
+    cur_provider, cur_url, _ = model_endpoint(name)
+    target = (target or "").strip()
+    preset = preset_by_key(target) or preset_for_url(target)
+    clearing = target.lower() in ("default", "none", "clear", "unset")
+    if not target:
+        die("an endpoint is needed: a preset key, an http(s) URL, or `default` to clear it")
+    if not clearing and not preset and "://" not in target:
+        die(f"'{target}' is neither a preset key nor an http(s) URL: run "
+            f"`{PROG} model {name} --endpoints` for the list of keys")
+    url = "" if clearing else normalize_endpoint(preset.get("url") or target)
+    if not clearing:
+        problem = endpoint_problem(url)
+        if problem:
+            die(f"refusing to write model.base_url: {problem}")
+    want_provider = (provider or "").strip() or str(preset.get("provider") or "")
+    done: list[str] = []
+
+    def write(args: list[str], label: str) -> bool:
+        res = run_hermes(["config"] + args, name, dry=dry, quiet=True)
+        if dry:
+            done.append(f"[dry-run] hermes -p {name} config {' '.join(args)}")
+            return True
+        if res.returncode != 0:
+            err = ((res.stderr or res.stdout or "").strip().splitlines() or
+                   ["hermes config failed"])[-1]
+            die(f"{label} was refused by Hermes: {err}")
+        done.append(f"hermes -p {name} config {' '.join(args)}")
+        return True
+
+    if clearing:
+        if cur_url:
+            write(["unset", "model.base_url"], "clearing model.base_url")
+    else:
+        if url != cur_url:
+            write(["set", "model.base_url", url], "writing model.base_url")
+        if want_provider and want_provider != cur_provider:
+            write(["set", "model.provider", want_provider], "writing model.provider")
+    # "cleared" means "whatever the provider ships": the project can still inherit the GLOBAL Hermes
+    # config, so the effective URL is read back after the write and reported as inherited instead of
+    # pretending the project has no endpoint at all.
+    inherited = ""
+    if clearing:
+        _, inherited, _ = model_endpoint(name)
+    eff = "" if clearing else url
+    target_url = eff or inherited
+    rep = endpoint_report(name, target_url, endpoint_key(name, target_url)) if target_url else {}
+    model = configured_model(name)
+    title = (f"{PROG} model {name} · endpoint "
+             + ("cleared" if clearing else ("updated" if done else "unchanged")))
+    lines = done + [""]
+    if rep:
+        if inherited:
+            lines.append("base_url : removed from this project's Hermes config")
+            lines.append(f"falls back: {inherited} (the global Hermes config)")
+            lines += endpoint_lines(rep, model)[1:]
+        else:
+            lines += endpoint_lines(rep, model)
+        if not rep.get("ok") and rep.get("needs_key") and preset.get("key_env"):
+            lines.append(f"next     : add {preset['key_env']} for this project")
+            lines.append(f"           herman access set-env {name} {preset['key_env']}")
+        elif not rep.get("ok") and rep.get("needs_key"):
+            lines.append(f"next     : add the API key for this project under Access -> API keys")
+        elif not rep.get("ok"):
+            lines.append("next     : check the URL, then Test again; Hermes keeps the old list "
+                         "until the endpoint answers")
+    if clearing and not inherited:
+        lines.append("base_url : removed: Hermes now uses the provider's own default")
+    if not clearing:
+        lines.append(f"config   : hermes uses this for every new session of '{name}'" if done
+                     else "config   : the project already points there, nothing was written")
+    print_frame(title, lines, color=amber if (rep and not rep.get("ok")) else green)
+    if rep and not rep.get("ok"):
+        print(amber(f"  the endpoint did not answer: the model list stays as it is until it does"))
+    return {"ok": bool(rep.get("ok")) if rep else True, "url": url, "provider": want_provider,
+            "wrote": done, "probe": rep}
 
 
 def _provider_models(provider: str | None) -> list[str]:
@@ -2730,9 +3136,10 @@ def ensure_current(rows: list[dict], model: str, provider: str) -> list[dict]:
     model = (model or "").strip()
     if not model or any(str(r.get("id")) == model for r in rows):
         return rows
-    where = 0
-    rows.insert(where, {"id": model, "provider": provider or "configured", "input_usd": "",
-                        "output_usd": "", "cache_usd": ""})
+    # `_configured` marks the row herman added: the endpoint did NOT offer it, so no count or table
+    # may present it as part of the endpoint's list.
+    rows.insert(0, {"id": model, "provider": provider or "configured", "input_usd": "",
+                    "output_usd": "", "cache_usd": "", "_configured": True})
     return rows
 
 
@@ -2759,19 +3166,22 @@ def endpoint_catalog(name: str, *, force: bool = False, max_age: int = 12 * 3600
                      persist: bool = True) -> dict:
     """The model list for one project, resolved in the order Hermes itself would use it.
 
-    1. the project's own endpoint: ``{base_url}/v1/models`` (cached for 12h, API key sent only when
-       the project has one, because plenty of local servers need none)
+    1. the project's own endpoint (see `probe_endpoint`: both common model-list spellings are tried,
+       the API key is sent only when the project has one because plenty of local servers need none),
+       cached for 12h per base_url AND per answered path
     2. Hermes' own local provider cache when there is no base_url at all (a plain provider such as
        openai/anthropic/nous) or when the endpoint answered nothing
     3. the optional user catalog file ``models-local.json``
     4. the project's configured model on its own, so the board is never empty
 
     Nothing here can raise: every read and every request is guarded, and the returned dict always has
-    the same shape (``source``, ``endpoint``, ``provider``, ``models``, ``age_s``). ``persist=False``
+    the same shape (``source``, ``endpoint``, ``provider``, ``models``, ``age_s`` plus ``url``,
+    ``status``, ``error`` and ``needs_key`` describing what the endpoint answered). ``persist=False``
     fetches live without touching the 12h cache, which is what ``sync --dry-run`` needs.
     """
     meta = catalog_meta()
-    provider, base_url, key = model_endpoint(name)
+    provider, base_url, _ = model_endpoint(name)
+    key = endpoint_key(name, base_url)
     model = configured_model(name)
     cache: dict = {}
     try:
@@ -2782,37 +3192,30 @@ def endpoint_catalog(name: str, *, force: bool = False, max_age: int = 12 * 3600
     if (base_url and not force and cache.get("models") and cache.get("base_url") == base_url
             and age < max_age):
         return {"source": cache.get("source", "cache"), "endpoint": base_url, "provider": provider,
-                "models": ensure_current(list(cache["models"]), model, provider), "age_s": int(age)}
+                "models": ensure_current(list(cache["models"]), model, provider), "age_s": int(age),
+                "url": cache.get("url") or "", "status": int(cache.get("status") or 200),
+                "error": "", "needs_key": False}
     live: list[dict] = []
+    probe: dict = {}
     if base_url:
         try:
-            headers = {"Accept": "application/json"}
-            if key:
-                headers["Authorization"] = "Bearer " + key
-            req = urllib.request.Request(base_url.rstrip("/") + "/v1/models", headers=headers)
-            with urllib.request.urlopen(req, timeout=8) as r:
-                payload = json.loads(r.read().decode("utf-8", "replace"))
-            items = payload.get("data", payload) if isinstance(payload, dict) else payload
-            if isinstance(items, dict):
-                items = list(items.values())
-            for it in items or []:
-                if isinstance(it, dict):
-                    mid = it.get("id") or it.get("model") or it.get("name")
-                else:
-                    mid = str(it)
-                if not mid:
-                    continue
-                m = _clean_row(dict(meta.get(str(mid)) or {}))
-                m["id"] = str(mid)
-                m.setdefault("provider", provider or "endpoint")
-                if not m.get("context") and isinstance(it, dict) and it.get("max_input_tokens"):
-                    try:
-                        m["context"] = _ctx_label(int(it["max_input_tokens"]))
-                    except (TypeError, ValueError):
-                        pass
-                live.append(m)
+            probe = probe_endpoint(base_url, key)
         except Exception:
-            live = []
+            probe = {}
+        for it in probe.get("rows") or []:
+            mid = (it.get("id") or it.get("model") or it.get("name")
+                   if isinstance(it, dict) else str(it))
+            if not mid:
+                continue
+            m = _clean_row(dict(meta.get(str(mid)) or {}))
+            m["id"] = str(mid)
+            m.setdefault("provider", provider or "endpoint")
+            if not m.get("context") and isinstance(it, dict) and it.get("max_input_tokens"):
+                try:
+                    m["context"] = _ctx_label(int(it["max_input_tokens"]))
+                except (TypeError, ValueError):
+                    pass
+            live.append(m)
     if live:
         live.sort(key=lambda m: (str(m.get("provider") or ""), m["id"]))
         try:
@@ -2823,34 +3226,41 @@ def endpoint_catalog(name: str, *, force: bool = False, max_age: int = 12 * 3600
             try:
                 CATALOG_CACHE.parent.mkdir(parents=True, exist_ok=True)
                 CATALOG_CACHE.write_text(json.dumps(
-                    {"ts": time.time(), "base_url": base_url, "source": "live", "models": live}),
+                    {"ts": time.time(), "base_url": base_url, "url": probe.get("url") or "",
+                     "status": probe.get("status") or 0, "source": "live", "models": live}),
                     encoding="utf-8")
             except OSError:
                 pass
         return {"source": "live", "endpoint": base_url, "provider": provider,
-                "models": ensure_current(live, model, provider), "age_s": 0}
+                "models": ensure_current(live, model, provider), "age_s": 0,
+                "url": probe.get("url") or "", "status": probe.get("status") or 0,
+                "error": "", "needs_key": False}
+    fallback = {"url": probe.get("url") or "", "status": probe.get("status") or 0,
+                "error": probe.get("error") or "", "needs_key": bool(probe.get("needs_key"))}
     rows = hermes_catalog(provider, model)
     if rows:
-        return {"source": "hermes", "endpoint": base_url, "provider": provider,
-                "models": ensure_current(rows, model, provider), "age_s": None}
+        return dict({"source": "hermes", "endpoint": base_url, "provider": provider,
+                     "models": ensure_current(rows, model, provider), "age_s": None}, **fallback)
     ids = _provider_models(None if provider in ("", "-") else provider)
     if ids:
         label = provider or "configured"
-        return {"source": "provider-cache", "endpoint": base_url, "provider": provider,
-                "models": ensure_current(
-                    [{"id": mid, "provider": label, "input_usd": "", "output_usd": "",
-                      "cache_usd": ""} for mid in sorted(set(ids))][:600], model, provider),
-                "age_s": None}
-    fallback = sorted(meta.values(), key=lambda m: (str(m.get("provider") or ""), m["id"]))
-    if fallback:
-        return {"source": "file", "endpoint": base_url, "provider": provider,
-                "models": ensure_current(list(fallback), model, provider), "age_s": None}
+        return dict({"source": "provider-cache", "endpoint": base_url, "provider": provider,
+                     "models": ensure_current(
+                         [{"id": mid, "provider": label, "input_usd": "", "output_usd": "",
+                           "cache_usd": ""} for mid in sorted(set(ids))][:600], model, provider),
+                     "age_s": None}, **fallback)
+    user_rows = sorted(meta.values(), key=lambda m: (str(m.get("provider") or ""), m["id"]))
+    if user_rows:
+        return dict({"source": "file", "endpoint": base_url, "provider": provider,
+                     "models": ensure_current(list(user_rows), model, provider), "age_s": None},
+                    **fallback)
     if model:
-        return {"source": "config", "endpoint": base_url, "provider": provider,
-                "models": [{"id": model, "provider": provider or "configured",
-                            "input_usd": "", "output_usd": "", "cache_usd": ""}], "age_s": None}
-    return {"source": "none", "endpoint": base_url, "provider": provider,
-            "models": [], "age_s": None}
+        return dict({"source": "config", "endpoint": base_url, "provider": provider,
+                     "models": [{"id": model, "provider": provider or "configured",
+                                 "input_usd": "", "output_usd": "", "cache_usd": ""}],
+                     "age_s": None}, **fallback)
+    return dict({"source": "none", "endpoint": base_url, "provider": provider,
+                 "models": [], "age_s": None}, **fallback)
 
 
 def model_report(name: str, *, refresh: bool = False) -> dict:
@@ -2862,8 +3272,10 @@ def model_report(name: str, *, refresh: bool = False) -> dict:
              or "-")
     base_url = (_yaml_scalar(cfg, "model", "base_url") or _yaml_scalar(gcfg, "model", "base_url")
                 or "-")
-    _, _url, key = model_endpoint(name)
+    _, _url, _cfg_key = model_endpoint(name)
+    key = endpoint_key(name, base_url if base_url != "-" else "")
     cat = endpoint_catalog(name, force=refresh)
+    preset = preset_for_url(base_url) if base_url not in ("-", "") else {}
     return {
         "project": name,
         "provider": provider,
@@ -2872,46 +3284,120 @@ def model_report(name: str, *, refresh: bool = False) -> dict:
         "key_present": bool(key),
         "available": _provider_models(None if provider in ("-", "") else provider),
         "catalog": cat["models"],
+        "catalog_offered": sum(1 for m in cat["models"] if not m.get("_configured")),
         "catalog_source": cat["source"],
         "catalog_age_s": cat["age_s"],
         "catalog_endpoint": cat["endpoint"] or base_url,
+        "endpoint_preset": preset.get("key", ""),
+        "endpoint_preset_label": preset.get("label", ""),
+        "endpoint_note": preset.get("note", ""),
+        "endpoint_key_env": preset.get("key_env", ""),
+        "endpoint_url": cat.get("url") or "",
+        "endpoint_status": cat.get("status") or 0,
+        "endpoint_error": cat.get("error") or "",
+        "endpoint_needs_key": bool(cat.get("needs_key")),
+        "presets": preset_rows(),
+        "preset_groups": [{"key": k, "label": v} for k, v in ENDPOINT_GROUPS],
     }
 
 
 def do_model(name: str, *, set_model: str | None = None, provider: str | None = None,
-             list_models: bool = False, refresh: bool = False, dry: bool = False):
+             list_models: bool = False, refresh: bool = False, list_endpoints: bool = False,
+             endpoint: str | None = None, probe: str | None = None, dry: bool = False):
     ensure_profile(name)
-    rep = model_report(name)
+    if endpoint is not None:
+        do_endpoint(name, endpoint, provider=provider, dry=dry)
+        return
+    rep = model_report(name, refresh=refresh)
+    if probe is not None:
+        _, base_url, _ = model_endpoint(name)
+        target = (probe or "").strip()
+        preset = preset_by_key(target)
+        url = preset.get("url") or normalize_endpoint(target) or base_url
+        if not url:
+            die("no endpoint to test: pass a URL or a preset key, or set one first "
+                f"({PROG} model {name} --endpoints)")
+        if target and not preset:
+            problem = endpoint_problem(url)
+            if problem:
+                die(f"cannot test that endpoint: {problem}")
+        result = endpoint_report(name, url, endpoint_key(name, url))
+        print_frame(f"{PROG} model {name} · endpoint test (nothing written)",
+                    endpoint_lines(result, rep["model"]),
+                    color=green if result["ok"] else amber)
+        if not result["ok"] and result.get("needs_key"):
+            print(dim(f"  a key for this project: {PROG} access set-env {name} <VAR>"))
+        return
+    if list_endpoints:
+        rows, group = [], ""
+        for pre in preset_rows():
+            if pre["group"] != group:
+                group = pre["group"]
+                if rows:
+                    rows.append("")
+                rows.append(pre["group_label"])
+            mark = "  <- current" if rep["endpoint_preset"] == pre["key"] else ""
+            rows.append(f"  {pre['key']:<12} {fit(pre['url'], 44):<44} "
+                        f"{pre['key_env'] or '-'}{mark}")
+        print_frame(f"{PROG} model {name} · {len(preset_rows())} endpoints to pick from",
+                    rows, color=cyan)
+        print(dim(f"  current: {rep['base_url']}   ·   any other URL: "
+                  f"{PROG} model {name} --endpoint https://host/v1"))
+        print(dim(f"  test before switching: {PROG} model {name} --probe <url|key>"
+                  f"   ·   back to the provider default: --endpoint default"))
+        return
     if list_models:
         cat = endpoint_catalog(name, force=refresh)
         rows = []
         group = ""
+        injected = 0
+        offered = sum(1 for m in cat["models"] if not m.get("_configured"))
         for m in cat["models"]:
             g = str(m.get("provider") or "endpoint")
             label = ("" if g == group else g)
             group = g
             inp, outp = (m.get("input_usd") or "").strip(), (m.get("output_usd") or "").strip()
             price = f"${inp} / ${outp}" if (inp or outp) else "price n/a"
-            mark = " ← current" if m["id"] == rep["model"] else ""
+            if m.get("_configured"):
+                mark = " *"
+                injected += 1
+            elif m["id"] == rep["model"]:
+                mark = " ← current"
+            else:
+                mark = ""
             rows.append([label, m["id"] + mark, str(m.get("context") or "-"), price])
-        where = (f"from {cat['endpoint']}" if cat["source"] in ("live", "cache") and cat["endpoint"]
+        where = (f"from {cat.get('url') or cat['endpoint']}"
+                 if cat["source"] in ("live", "cache") and cat["endpoint"]
                  else f"from {catalog_source_label(cat['source'])}")
-        print_frame(f"{PROG} model {name} · {len(rows)} models {where}",
+        print_frame(f"{PROG} model {name} · {offered} models {where}" if offered
+                    else f"{PROG} model {name} · no model list {where}",
                     [f"{r[0]:<10} {r[1]:<30} {r[2]:>6}  in/out {r[3]}" for r in rows] or
                     ["no model list available: set model.base_url, or let Hermes fetch its model "
                      "list once (hermes model)"], color=cyan)
         print(dim(f"  source: {catalog_source_label(cat['source'])}"
                   f"   ·   change: {PROG} model {name} --set <model-id>"))
+        if injected:
+            print(dim(f"  * the configured model '{rep['model']}': this endpoint does not offer it, "
+                      f"so a session would likely fail until you --set another one"))
         return
     if not set_model and not provider:
-        print(f"{name}: model = {bold(rep['model'])}   provider = {bold(rep['provider'])}"
-              + (f"   base_url = {rep['base_url']}" if rep["base_url"] != "-" else ""))
+        print(f"{name}: model = {bold(rep['model'])}   provider = {bold(rep['provider'])}")
+        if rep["base_url"] == "-":
+            print(dim("  endpoint: the provider's own default (no model.base_url set)"
+                      f"   ·   pick one: {PROG} model {name} --endpoints"))
+        else:
+            tag = f" [{rep['endpoint_preset']}]" if rep["endpoint_preset"] else ""
+            print(dim(f"  endpoint: {rep['base_url']}{tag}"
+                      f"   ·   switch: {PROG} model {name} --endpoints"
+                      f"   ·   test: {PROG} model {name} --probe"))
         if rep["catalog"]:
             where = (rep["catalog_endpoint"] if rep["catalog_source"] in ("live", "cache")
                      and rep["catalog_endpoint"] else catalog_source_label(rep["catalog_source"]))
-            print(dim(f"  {len(rep['catalog'])} models available from {where}"
-                      f"   ·   list them: {PROG} model {name} --list"))
-        print(dim(f"  change: {PROG} model {name} --set <model-id> [--provider <name>]"))
+            print(dim(f"  {rep['catalog_offered'] or len(rep['catalog'])} models available "
+                      f"from {where}   ·   list them: {PROG} model {name} --list"))
+        elif rep["endpoint_error"]:
+            print(amber(f"  endpoint: {rep['endpoint_error']}"))
+        print(dim(f"  change model: {PROG} model {name} --set <model-id> [--provider <name>]"))
         return
     if provider:
         res = run_hermes(["config", "set", "model.provider", provider], name, dry=dry)
@@ -5160,7 +5646,7 @@ _herman() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --summary --tidy --logs --audit --unused --status web completion model git access kill stop sync refresh security sec history remove rm delete --stats --delete-message --delete-session --delete-matching --delete-all --session --all --fix --dry-run -y --yes -v --verbose --json -h --help"
+  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --summary --tidy --logs --audit --unused --status web completion model git access kill stop sync refresh security sec history remove rm delete --stats --delete-message --delete-session --delete-matching --delete-all --session --all --fix --dry-run -y --yes -v --verbose --json -h --help --set --provider --list --refresh --endpoints --endpoint --base-url --probe"
   case "${prev}" in
     -u|--use|-i|--info|-d|--doctor|-r|--remove|-C|--cwd|--usage|--logs|--audit|--alias|remove|rm|delete|history|kill|stop|sync|refresh|security|sec)
       COMPREPLY=( $(compgen -W "$(_herman_projects)" -- "${cur}") ); return 0 ;;
@@ -5172,6 +5658,9 @@ _herman() {
       return 0 ;;
     --summary)
       COMPREPLY=( $(compgen -W "usage cache overview $(_herman_projects)" -- "${cur}") ); return 0 ;;
+    --endpoint|--base-url|--probe)
+      # preset keys come from `herman model <project> --endpoints`; `default` drops base_url
+      COMPREPLY=( $(compgen -W "default" -- "${cur}") ); return 0 ;;
     -p|--project|--rename|--from|--alias-name)
       return 0 ;;
   esac
@@ -5211,6 +5700,24 @@ _herman() {
     '--summary[usage analysis]:scope or project:(usage cache overview)'
     '--logs[logs]:project:_herman_projects'
     '--tidy[tidy]:project:_herman_projects'
+    'model[model]:project:_herman_projects'
+    '--list[models the endpoint offers]'
+    '--refresh[re-ask the endpoint]'
+    '--endpoints[every endpoint to pick from]'
+    '--endpoint[switch model.base_url]:key, url or default:(default)'
+    '--base-url[switch model.base_url]:key, url or default:(default)'
+    '--probe[test an endpoint, write nothing]:key, url or default:(default)'
+    '--set[switch the model]:model id:'
+    '--provider[hermes provider]:provider:'
+    'git[git]'
+    'access[access]'
+    'kill[stop sessions]:project:_herman_projects'
+    'stop[stop sessions]:project:_herman_projects'
+    'sync[sync with the engine]'
+    'refresh[sync with the engine]'
+    'security[security battery]'
+    'history[history]:project:_herman_projects'
+    'remove[delete project]:project:_herman_projects'
     'web[web panel]'
     '-h[help]'
   )
@@ -6038,8 +6545,16 @@ def main(argv: list[str]) -> int:
     if cmd == "model":
         nm = rest[1] if len(rest) > 1 and not rest[1].startswith("-") else None
         nm = nm or active_profile() or load_state().get("last") or DEFAULT_HERMES
+        # --endpoint/--probe take a value that may be absent on purpose (a bare `--probe` tests the
+        # endpoint already configured), so the flag and its value are read separately: val() answers
+        # the default whenever the next token is another flag, which would look like "no flag".
+        ep = next((f for f in ("--endpoint", "--base-url") if f in rest), None)
         do_model(nm, set_model=val("--set"), provider=val("--provider"),
-                 list_models="--list" in rest, refresh="--refresh" in rest, dry=dry)
+                 list_models="--list" in rest, refresh="--refresh" in rest,
+                 list_endpoints=has("--endpoints", "--base-urls"),
+                 endpoint=val(ep, "") if ep else None,
+                 probe=val("--probe", "") if "--probe" in rest else None,
+                 dry=dry)
         return 0
 
     if cmd == "git":

@@ -692,6 +692,7 @@
       <section class="view" id="view-model">
         <div class="subtabs">
           <button class="subtab active" data-sub="current" onclick="modelTab('current')">Current model</button>
+          <button class="subtab" data-sub="endpoint" onclick="modelTab('endpoint')">Endpoint</button>
           <button class="subtab" data-sub="change" onclick="modelTab('change')">Change model</button>
           <button class="subtab" data-sub="skills" onclick="modelTab('skills')">Skills</button>
           <button class="subtab" data-sub="tools" onclick="modelTab('tools')">Tools</button>
@@ -710,6 +711,40 @@
           </div>
         </div>
 
+        <div class="subpane" data-sub="endpoint">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Endpoint of this project</div>
+            <p class="hint" id="ep-head">Loading the endpoint…</p>
+            <div class="row">
+              <div>
+                <label class="f" for="ep-preset">Pick a provider</label>
+                <select id="ep-preset" onchange="pickPreset()" aria-label="Common provider endpoints"></select>
+              </div>
+              <div>
+                <label class="f" for="ep-url">Endpoint (model.base_url)</label>
+                <input id="ep-url" placeholder="https://api.my-hub.example/v1" autocomplete="off" spellcheck="false" oninput="updateEndpointNote()">
+              </div>
+              <div>
+                <label class="f" for="ep-provider">Hermes provider</label>
+                <input id="ep-provider" placeholder="custom" autocomplete="off" spellcheck="false" oninput="updateEndpointNote()">
+              </div>
+            </div>
+            <p class="hint" id="ep-note" style="margin-top:10px">…</p>
+            <p class="hint" id="ep-what">…</p>
+            <div class="btnrow" style="margin-top:12px">
+              <button class="primary" onclick="applyEndpoint()" title="Writes model.base_url (and the Hermes provider) with hermes config set, then tests the endpoint and reloads the model list.">Apply endpoint</button>
+              <button class="ghost" onclick="testEndpoint()" title="herman model <project> --probe <url|key>: asks the endpoint for its model list and writes nothing.">Test connection</button>
+              <button class="ghost" onclick="clearEndpoint()" title="herman model <project> --endpoint default: removes model.base_url so the provider default applies.">Use provider default</button>
+              <button class="ghost" onclick="loadModelData()" title="Re-read this project's Hermes config and forget unsaved edits.">Reset form</button>
+              <span class="hint" id="ep-pick-note"></span>
+            </div>
+            <div class="btnrow" style="margin-top:8px">
+              <span class="hint" id="ep-key">…</span>
+              <button class="ghost" onclick="openApiKeys()" title="Access -> API keys, with the focus project selected and the variable this endpoint needs prefilled.">Add an API key</button>
+            </div>
+          </div>
+        </div>
+
         <div class="subpane" data-sub="change">
           <div class="card pad">
             <p class="hint" id="model-endpoint">Loading the model list from the endpoint…</p>
@@ -718,17 +753,14 @@
                 <label class="f" for="model-filter">Find a model</label>
                 <input id="model-filter" placeholder="filter by name, e.g. claude, gpt-5, qwen, glm" autocomplete="off" oninput="renderModels()">
               </div>
-              <div>
-                <label class="f" for="model-provider">Hermes provider</label>
-                <input id="model-provider" placeholder="custom" autocomplete="off">
-              </div>
             </div>
-            <p class="hint" style="margin-top:8px">Keep the Hermes provider as it is (usually <code>custom</code>): only the model id changes, the endpoint stays the same.</p>
+            <p class="hint" style="margin-top:8px">Only the model id is written here. The endpoint and the Hermes provider live in the <b>Endpoint</b> tab, and this list follows them.</p>
             <div class="subhead" id="model-source">Models offered by the endpoint</div>
             <select id="model-name" class="picker" size="11" onchange="pickModel()" aria-label="Models offered by the endpoint"></select>
             <div class="btnrow" style="margin-top:12px">
               <button class="primary" onclick="setModel()" title="herman model <project> --set <id> [--provider <p>].">Apply model</button>
               <button class="ghost" onclick="refreshModels()" title="Ask the endpoint for the list again (skips the cache).">Reload list</button>
+              <button class="ghost" onclick="modelTab('endpoint')" title="Which endpoint this list comes from, and how to switch it.">Endpoint…</button>
               <span class="hint" id="model-pick-note"></span>
             </div>
           </div>
@@ -1580,8 +1612,8 @@ function kv(id, rows){
 let modelCatalog = [], modelCurrent = '', modelProvider = '';
 
 /* ---------- Model board: skills, tools and SOUL.md of the focus project ---------- */
-const MODEL_TABS = {current: () => {}, change: () => {}, skills: () => loadSkills(),
-                    tools: () => loadTools(), soul: () => loadSoul()};
+const MODEL_TABS = {current: () => {}, endpoint: () => loadModelData(), change: () => {},
+                    skills: () => loadSkills(), tools: () => loadTools(), soul: () => loadSoul()};
 function modelTab(key){
   vtab('model', key);
   const load = MODEL_TABS[key];
@@ -1788,7 +1820,10 @@ function renderModels(){
       const price = bits.join(' / ');
       o.textContent = m.id + '   ' + (m.context ? m.context : '') + (price ? '   ' + price : '');
       o.title = m.id + ' · ' + prov + (m.context ? ' · ' + m.context : '') + (price ? ' · ' + price : '');
-      if (m.id === modelCurrent) o.textContent += '   (current)';
+      if (m.id === modelCurrent) {
+        o.textContent += m._configured ? '   (current, not offered here)' : '   (current)';
+      }
+      if (m._configured) o.title += ' · this endpoint does not offer it';
       g.appendChild(o);
     });
     sel.appendChild(g);
@@ -1839,7 +1874,13 @@ function modelView(m){
   modelCatalog = m.catalog || [];
   modelCurrent = m.model === '-' ? '' : m.model;
   modelProvider = m.provider === '-' ? '' : m.provider;
-  document.getElementById('model-provider').value = m.provider === '-' ? '' : m.provider;
+  endpointPresets = m.presets || [];
+  endpointSaved = m.base_url === '-' ? '' : m.base_url;
+  endpointPreset = m.endpoint_preset || '';
+  endpointKeyEnv = m.endpoint_key_env || '';
+  endpointNeedsKey = !!m.endpoint_needs_key;
+  renderPresets();
+  endpointSummary(m);
   const src = {live: 'live list from the endpoint', cache: 'cached list from the endpoint',
                hermes: "Hermes' own local model data (no custom base_url)",
                'provider-cache': "Hermes' cached model ids for this provider",
@@ -1849,14 +1890,18 @@ function modelView(m){
   const e = document.getElementById('model-endpoint');
   if (e) {
     if (!modelCatalog.length){
-      e.textContent = 'No model list available. Set model.base_url for this project, or run '
+      e.textContent = 'No model list available. Set model.base_url in the Endpoint tab, or run '
         + 'hermes model once so the engine fetches its own provider list.';
     } else if (m.catalog_source === 'live' || m.catalog_source === 'cache'){
-      e.textContent = 'Endpoint ' + (m.catalog_endpoint || m.base_url) + ' answers with '
-        + modelCatalog.length + ' models (' + src[m.catalog_source] + '). Pick one below, then press Apply model.';
+      const n = m.catalog_offered || 0;
+      e.textContent = 'Endpoint ' + (m.catalog_endpoint || m.base_url) + ' offers ' + n
+        + (n === 1 ? ' model (' : ' models (') + src[m.catalog_source] + '). Pick one below, '
+        + 'then press Apply model.' + missingNote();
     } else {
-      e.textContent = 'No model list from the project endpoint: showing ' + modelCatalog.length
-        + ' models from ' + (src[m.catalog_source] || m.catalog_source) + '. Pick one below, then press Apply model.';
+      const n = m.catalog_offered || 0;
+      e.textContent = 'No model list from the project endpoint: showing ' + n
+        + (n === 1 ? ' model from ' : ' models from ')
+        + (src[m.catalog_source] || m.catalog_source) + '. Pick one below, then press Apply model.';
     }
   }
   const so = document.getElementById('model-source');
@@ -1865,11 +1910,165 @@ function modelView(m){
        ? 'Models offered by ' + (m.catalog_endpoint || m.base_url)
        : 'Models from ' + (src[m.catalog_source] || m.catalog_source))
     : 'Models offered by the endpoint';
-  setHint('model-known', (m.base_url === '-' ? 'not set' : m.base_url)
+  setHint('model-known', (m.base_url === '-' ? 'provider default' : m.base_url
+          + (m.endpoint_preset ? ' (' + m.endpoint_preset + ')' : ''))
           + ' · provider ' + (m.provider === '-' ? 'not set' : m.provider)
           + ' · api key ' + (m.key_present ? 'present' : 'missing'));
   renderModels();
   pickModel();
+}
+/* ---------- Model board: the endpoint (model.base_url) of the focus project ---------- */
+let endpointPresets = [], endpointSaved = '', endpointPreset = '';
+let endpointKeyEnv = '', endpointNeedsKey = false;
+const CATALOG_SRC = {live: 'the endpoint (live)', cache: 'the endpoint (cached answer)',
+  hermes: "Hermes' own local model data", 'provider-cache': "Hermes' provider cache",
+  file: 'the optional local catalog file (models-local.json)',
+  config: "this project's configured model only", none: 'nowhere yet'};
+
+function missingNote(){
+  /* True when the project's own model is absent from what the endpoint offers: herman keeps it at the
+     top of the picker so it stays visible, and this says it does not come from the endpoint. */
+  if (!modelCurrent) return '';
+  return modelCatalog.some(x => x.id === modelCurrent && !x._configured) ? ''
+    : " This endpoint does not offer '" + modelCurrent + "': pick another model before starting a session.";
+}
+function loadModelData(){
+  if (!document.getElementById('ep-preset')) return Promise.resolve();
+  return fetch(`/api/model?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)
+    .then(r => r.json()).then(modelView).catch(() => {});
+}
+function renderPresets(){
+  const sel = document.getElementById('ep-preset');
+  if (!sel) return;
+  sel.textContent = '';
+  const add = (value, label, title) => {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = label; if (title) o.title = title;
+    sel.appendChild(o); return o;
+  };
+  add('__current__', endpointSaved ? 'Current endpoint' : 'Current endpoint (provider default)',
+      endpointSaved ? 'The endpoint this project is configured with: ' + endpointSaved +
+        ' · pick a preset or type another URL' : 'No model.base_url is set: the provider default applies');
+  const groups = new Map();
+  endpointPresets.forEach(p => {
+    const g = p.group_label || 'Endpoints';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(p);
+  });
+  groups.forEach((items, g) => {
+    const og = document.createElement('optgroup');
+    og.label = g;
+    items.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.key; o.textContent = p.label;
+      o.title = p.url + ' · Hermes provider ' + p.provider +
+        (p.key_env ? ' · key variable ' + p.key_env : ' · no key needed') +
+        (p.note ? ' · ' + p.note : '');
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  });
+  add('__custom__', 'Custom URL (type it below)',
+      'Any OpenAI-compatible endpoint: type its base URL in the field beside this list');
+  add('default', 'Provider default (no base_url)',
+      'Removes model.base_url so the configured provider uses its own endpoint');
+  sel.value = endpointPreset || (endpointSaved ? '__current__' : 'default');
+  pickPreset(true);
+}
+function pickPreset(quiet){
+  const key = document.getElementById('ep-preset').value || '';
+  const url = document.getElementById('ep-url'), prov = document.getElementById('ep-provider');
+  const note = document.getElementById('ep-pick-note');
+  if (key === '__custom__'){
+    if (!quiet){ url.value = ''; url.focus(); }
+    if (note) note.textContent = 'Type any http(s) endpoint, then Apply';
+    updateEndpointNote(); return;
+  }
+  if (key === 'default'){
+    url.value = ''; prov.value = modelProvider || 'custom';
+    if (note) note.textContent = 'Applying removes model.base_url';
+    updateEndpointNote(); return;
+  }
+  if (key === '__current__'){
+    url.value = endpointSaved; prov.value = modelProvider || 'custom';
+    if (note) note.textContent = '';
+    updateEndpointNote(); return;
+  }
+  const p = endpointPresets.find(x => x.key === key);
+  if (!p) return;
+  url.value = p.url;
+  prov.value = p.provider || 'custom';
+  if (note) note.textContent = p.label + ' · provider ' + p.provider +
+    (p.key_env ? ' · needs ' + p.key_env : ' · no key needed') + (p.note ? ' · ' + p.note : '');
+  updateEndpointNote();
+}
+function updateEndpointNote(){
+  const url = v('ep-url').trim(), prov = v('ep-provider').trim();
+  if (!url){
+    setHint('ep-what', 'Applying runs: hermes -p ' + focusProject +
+      ' config unset model.base_url  ·  Hermes then uses the default endpoint of provider ' +
+      (prov || 'custom') + '.');
+    return;
+  }
+  setHint('ep-what', 'Applying runs: hermes -p ' + focusProject + ' config set model.base_url ' + url +
+    (prov ? '  ·  hermes -p ' + focusProject + ' config set model.provider ' + prov : '') +
+    '  ·  herman never writes config.yaml itself, so Hermes reads exactly these values.');
+}
+function endpointSummary(m){
+  setHint('ep-head', focusProject + ': the endpoint and the Hermes provider belong to this ' +
+    "project's Hermes config, so switching here changes what every new session of it uses. " +
+    'Pick a common provider, or type any OpenAI-compatible URL.');
+  const src = m.catalog_source;
+  if (src === 'live' || src === 'cache'){
+    const n = m.catalog_offered || 0;
+    setHint('ep-note', 'The endpoint ' + (m.endpoint_url || endpointSaved) + ' offers ' + n +
+      (n === 1 ? ' model (' : ' models (') + (src === 'live' ? 'asked just now' : 'cached answer') + ').');
+  } else {
+    setHint('ep-note', 'The endpoint did not give a model list' +
+      (m.endpoint_error ? ': ' + m.endpoint_error : '') + '. The picker in Change model shows ' +
+      (m.catalog_offered || 0) + ' models from ' + (CATALOG_SRC[src] || src || 'nowhere yet') + '.');
+  }
+  const key = document.getElementById('ep-key');
+  if (key){
+    if (m.key_present) key.textContent = 'API key: this project has one for this endpoint.';
+    else if (endpointNeedsKey) key.textContent = 'API key: the endpoint asks for one, none is set for this project' +
+      (endpointKeyEnv ? ' (add ' + endpointKeyEnv + ')' : '') + '.';
+    else key.textContent = 'API key: none needed here (local servers and free tiers answer without one).';
+  }
+  updateEndpointNote();
+}
+async function applyEndpoint(){
+  let url = v('ep-url').trim(), prov = v('ep-provider').trim();
+  const picked = document.getElementById('ep-preset').value || '';
+  const target = url || (picked === 'default' ? 'default' : '');
+  if (!target){ setStatus('error', 'Pick a provider or type an endpoint URL first.'); return; }
+  if (target === 'default'){
+    const ans = prompt(`Remove model.base_url from "${focusProject}"?\n\nHermes then uses the ` +
+      `default endpoint of provider ${prov || 'custom'}.\n\nType the project name to confirm:`);
+    if (ans !== focusProject){ setStatus('warn', 'Cancelled. Nothing changed.'); return; }
+  }
+  const body = {target: target};
+  if (prov) body.provider = prov;
+  await runPost('model-set-endpoint', focusProject, body);
+  await loadModelData();
+}
+function testEndpoint(){
+  const url = v('ep-url').trim();
+  const picked = document.getElementById('ep-preset').value || '';
+  const target = url || (picked && picked !== '__current__' && picked !== '__custom__' ? picked : '');
+  run('model-probe', focusProject, {target: target});   // read-only: nothing is written
+}
+function clearEndpoint(){
+  const sel = document.getElementById('ep-preset');
+  sel.value = 'default';
+  pickPreset();
+  applyEndpoint();
+}
+function openApiKeys(){
+  const field = document.getElementById('env-var');
+  if (field && endpointKeyEnv) field.value = endpointKeyEnv;
+  navigate('access');
+  accessTab('keys');
 }
 function gitView(g){
   if (!g.repo){
@@ -3015,6 +3214,8 @@ const LABELS = {
   logs: 'Reading log…', audit: 'Auditing memory and skills…', doctor: 'Running health check…',
   'doctor-all': 'Checking every project…', remove: 'Deleting project…', create: 'Creating project…',
   list: 'Listing projects…', 'model-set': 'Updating model…', git: 'Reading git status…',
+  'model-set-endpoint': 'Writing the endpoint into the Hermes config…',
+  'model-probe': 'Testing the endpoint…',
   'git-init': 'Initialising repository…', 'git-set-user': 'Saving git identity…',
   'git-set-remote': 'Saving remote…', 'git-rm-remote': 'Removing remote…',
   'git-set-helper': 'Saving credential helper…', 'git-set-workdir': 'Saving workdir…',
@@ -3075,6 +3276,7 @@ const MUTATING_ACTIONS = new Set([
   'cwd', 'git-init', 'git-set-workdir', 'git-set-user', 'git-set-remote', 'git-rm-remote',
   'git-set-helper', 'access-set-env', 'access-unset-env', 'access-new-key', 'access-revoke-key',
   'access-add-agent', 'access-revoke-agent', 'access-gitcred-add', 'access-gitcred-rm',
+  'model-set-endpoint',
 ]);
 async function run(action, name, extra, opts){
   /* State-changing actions are POSTed, read-only ones are fetched with GET; both answer the same
@@ -3366,11 +3568,7 @@ function removeProject(name){
 function setModel(){
   const model = v('model-name');
   if (!model){ setStatus('error', 'Pick a model from the list first.'); return; }
-  if (!model){ setStatus('error', 'Enter a model id first.'); return; }
-  const prov = v('model-provider');
-  const extra = {model: model};
-  if (prov && prov !== modelProvider) extra.provider = prov;   // provider stays untouched otherwise
-  run('model-set', focusProject, extra);
+  run('model-set', focusProject, {model: model});   // provider + endpoint belong to the Endpoint tab
 }
 function gitAction(action, body, fieldId, extra){
   runPost(action, focusProject, Object.assign({}, body || {}, extra || {}));

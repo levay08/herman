@@ -108,6 +108,21 @@ def main() -> int:
     check("a mutating action over GET is refused", st, 405)
     st, _h, _b = call("GET", f"/api/action?t={token}&action=list", port=port, host=host)
     check("a read-only action over GET is allowed", st, 200)
+    st, _h, _b = call("GET", f"/api/action?t={token}&action=model-set-endpoint&name=default",
+                      port=port, host=host)
+    check("writing an endpoint over GET is refused", st, 405)
+    st, _h, _b = call("GET", f"/api/action?t={token}&action=model-probe&name=default"
+                             f"&target=http://127.0.0.1:9/x", port=port, host=host)
+    check("testing an endpoint over GET is allowed", st, 200)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=model-set-endpoint&name=default"
+                              f"&target=not-a-url", port=port, host=host)
+    check("an endpoint that is not a URL is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=model-set-endpoint&name=default"
+                              f"&target=--all", port=port, host=host)
+    check("an endpoint that looks like a flag is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=model-set-endpoint&target=default",
+                      port=port, host=host)
+    check("writing an endpoint without a project is refused", st, 400)
     for label, query in (("a name that looks like a flag", "action=tidy&name=--all"),
                          ("a session id that looks like a flag", "action=kill-session&name=default&session=--all"),
                          ("a search term that looks like a flag", "action=history-delete-matching&name=default&q=--delete-all"),

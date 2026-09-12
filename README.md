@@ -48,8 +48,13 @@ herman sync [--fix]          re-check herman against the installed Hermes
 
 ```sh
 herman kill <name> [session-id]        stop a running session (SIGINT first, like Ctrl+C)
-herman model [name]                    current model and provider
+herman model [name]                    current model, provider and endpoint
 herman model <name> --list             models your endpoint offers, with prices
+herman model <name> --endpoints        every endpoint you can point the project at
+herman model <name> --endpoint <key|url>  switch model.base_url (a provider preset or any URL,
+                                       plus `--endpoint default` to drop it); written with
+                                       `hermes config set`, so Hermes itself picks it up
+herman model <name> --probe [key|url]  test an endpoint and write nothing
 herman model <name> --set <id>         switch model (--provider <p> changes the provider)
 herman history <name> --stats          sessions, messages and usage rows
 herman history <name> --delete-matching <q> | --delete-session <id> | --delete-all
@@ -73,7 +78,9 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
 - **Dashboard** all-project overview plus total token usage
 - **Projects** one card per project (model, workdir, skills, memory, live session); actions stream
   their output into the console at the bottom
-- **Model** current model, model changer and the token usage board
+- **Model** current model, the **Endpoint** tab (pick one of the common provider APIs or type any
+  OpenAI-compatible URL, test it before switching, and the model list follows it) and the model
+  changer
 - **Insights** history search (click a hit to read the full message), activity, tool counters,
   context health, error digest
 - **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections
