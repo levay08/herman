@@ -24,6 +24,7 @@ import signal
 import subprocess
 import getpass
 import tempfile
+import textwrap
 import sys
 import time
 import json
@@ -1089,6 +1090,8 @@ command; the engine stays the Hermes you already have.
   {PROG} -b, --backup <name|--all>  back up to ~/Documents/{PROG}-backup/
   {PROG} -x, --restore <file> [--as name]  restore from a backup
   {PROG} --usage [name] [--days N]  tokens/cost (hermes insights)
+  {PROG} --summary usage|cache <name>  the same numbers read out in plain English
+  {PROG} --summary overview         the fleet-wide analysis (dashboard totals)
   {PROG} --tidy [name|--all]        prune old sessions/checkpoints
   {PROG} --logs <name> [-f]         view a project log
   {PROG} --audit [name]             memory + skills summary (stray markers)
@@ -2305,6 +2308,9 @@ def cmd_web(argv: list[str]):
                 "tidy": lambda: ["--tidy", name or "--all"] + tail,
                 "tidy-all": lambda: ["--tidy", "--all"] + tail,
                 "usage": lambda: (["--usage", name] if name else ["--usage"]) + tail,
+                "summary-overview": lambda: ["--summary", "overview"] + tail,
+                "summary-usage": lambda: ["--summary", "usage", name] + tail,
+                "summary-cache": lambda: ["--summary", "cache", name] + tail,
                 "logs": lambda: ["--logs", name, "-n", "60"] + tail,
                 "audit": lambda: (["--audit", name] if name else ["--audit"]) + tail,
                 "doctor": lambda: (["-d", name] if name else ["-d", "--all"]) + tail,
@@ -2346,7 +2352,8 @@ def cmd_web(argv: list[str]):
             # Secrets (API keys, tokens) reach the CLI through HERMAN_SECRET, never argv.
             secret_actions = ("access-set-env", "access-gitcred-add")
             if not name and action in ("git-init", "git-set-workdir", "git-set-user", "git-set-remote",
-                                       "git-rm-remote", "git-set-helper", "access-set-env"):
+                                       "git-rm-remote", "git-set-helper", "access-set-env",
+                                       "summary-usage", "summary-cache"):
                 self._json({"error": "this action requires a project name"}, 400)
                 return
             confirm_targets = {
@@ -3575,6 +3582,314 @@ def usage_overview() -> dict:
             "shared_history": dupes}
 
 
+# ------------------------------------------------------- usage analysis text ---
+# The panel's three analysis buttons (dashboard usage, Insights usage, Insights cache) print a plain
+# English reading of the table above them into the output dock: nothing is rendered until the
+# operator asks for it, and the text gets the full width of the dock. Every sentence is derived from
+# the same dict the table renders, so the prose cannot drift from the numbers, and every figure that
+# is an estimate says so.
+
+def _tok_text(n) -> str:
+    """Token counts in the compact form the panel tiles use (12.3k, 1.24M)."""
+    try:
+        v = float(n or 0)
+    except (TypeError, ValueError):
+        return "0"
+    if v >= 1e9:
+        return f"{v / 1e9:.2f}B"
+    if v >= 1e6:
+        return f"{v / 1e6:.2f}M"
+    if v >= 1e3:
+        return f"{v / 1e3:.1f}k"
+    return str(int(v))
+
+
+def _usd_text(value) -> str:
+    """A USD amount, or the words the analysis uses when the price table has no row."""
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _pct(part, whole) -> str:
+    try:
+        return f"{100.0 * float(part) / float(whole):.1f}%"
+    except (TypeError, ValueError, ZeroDivisionError):
+        return "0.0%"
+
+
+def _active_days(days: list[dict]) -> list[dict]:
+    return [d for d in (days or []) if int(d.get("calls") or 0) or int(d.get("total") or 0)]
+
+
+def _summary_width() -> int:
+    """Wrap width for the analysis text.
+
+    A pipe (the panel's output dock, a cron job, `> file`) always gets a fixed 96 columns, because
+    COLUMNS from the parent shell would otherwise hand the dock lines wider than the dock itself.
+    """
+    if not sys.stdout.isatty():
+        return 96
+    return max(40, term_width() - 4)
+
+
+def _para_lines(paras: list[str], width: int | None = None) -> list[str]:
+    """Wrap paragraphs to the frame's inner width, one empty line between them."""
+    inner = width or _summary_width()
+    out: list[str] = []
+    for i, p in enumerate(paras):
+        if i:
+            out.append("")
+        out.extend(textwrap.wrap(" ".join(str(p).split()), inner) or [""])
+    return out
+
+
+def usage_summary(report: dict) -> list[str]:
+    """Two paragraphs reading one project's usage report: what it consumed, and what it means."""
+    t = report.get("totals") or {}
+    project = report.get("project") or "this project"
+    total = int(t.get("total") or 0)
+    calls = int(t.get("calls") or 0)
+    sessions = int(t.get("sessions") or 0)
+    fresh = int(t.get("input") or 0)
+    output = int(t.get("output") or 0)
+    cached = int(t.get("cache_read") or 0)
+    reason = int(t.get("reasoning") or 0)
+    days = report.get("days") or []
+    busy = _active_days(days)
+    window = len(days) or USAGE_DAYS
+    models = report.get("models") or []
+    active = report.get("active_model") or "-"
+    if not total and not calls:
+        return [f"{project} has no model usage recorded yet, so there is nothing to analyse. The "
+                f"tables stay empty until a session reports its first tokens."]
+    prompt = fresh + cached
+    per_call_prompt = prompt / calls if calls else 0
+    per_call_out = output / calls if calls else 0
+    per_session = total / sessions if sessions else 0
+    per_day = total / len(busy) if busy else 0
+    out_share = 100.0 * output / total if total else 0.0
+    top = models[0] if models else {}
+    limit = int(top.get("context_limit") or 0)
+    est = t.get("est_usd")
+
+    p1 = (f"{project} has moved {_tok_text(total)} tokens in the last {window} days: "
+          f"{_tok_text(fresh)} fresh input plus {_tok_text(output)} generated output, across "
+          f"{calls:,} API calls in {sessions} session(s). That averages {_tok_text(per_call_prompt)} "
+          f"prompt tokens and {_tok_text(per_call_out)} generated tokens per call, "
+          f"{_tok_text(per_session)} tokens per session, on {len(busy)} active day(s) at about "
+          f"{_tok_text(per_day)} tokens a day.")
+    if top.get("model") and top["model"] != active:
+        p1 += (f" Most of it ran on {top['model']} ({_pct(top.get('total'), total)} of the tokens), "
+               f"while the project is configured for {active} now.")
+    elif top.get("model"):
+        p1 += (f" {top['model']} is also the model the project is configured for, so this is the "
+               f"current baseline.")
+    if report.get("previous_models"):
+        p1 += (f" {len(report['previous_models'])} other model(s) appear in older sessions, so part of "
+               f"this history was produced under different prices.")
+    if reason:
+        p1 += (f" About {_pct(reason, output)} of the output tokens are reasoning tokens: billed as "
+               f"output, never shown to you.")
+
+    p2 = []
+    if est is None:
+        p2.append("There is no cost estimate for this project: the price table has no row for at least "
+                  "one of the models it used, so only the token counts above are comparable.")
+    else:
+        p2.append(f"At list prices those tokens come to about {_usd_text(est)}"
+                  + (f", roughly ${est / calls:.4f} per call" if calls else "")
+                  + " (an estimate from third-party price tables, not an invoice).")
+    if prompt:
+        p2.append(f"The prompt cache answered {_pct(cached, prompt)} of the prompt traffic, so "
+                  f"{_pct(fresh, prompt)} of it had to be sent fresh.")
+    if out_share >= 40.0:
+        p2.append(f"Output is {out_share:.0f}% of the tokens, so this project spends more on writing "
+                  f"than on reading: long answers, verbose tool output or heavy reasoning on every turn "
+                  f"is what usually produces that shape.")
+    else:
+        p2.append(f"Output is {out_share:.0f}% of the tokens, the ordinary shape for agent work: the "
+                  f"model reads a large context and writes a short answer, so the prompt side is where "
+                  f"the money goes.")
+    if limit and per_call_prompt:
+        share = 100.0 * per_call_prompt / limit
+        if share >= 60.0:
+            p2.append(f"An average call already carries {share:.0f}% of the {_tok_text(limit)} token "
+                      f"context window of {top.get('model') or 'the active model'}, and that is the "
+                      f"number to watch: near the window Hermes starts compacting the history, after "
+                      f"which every turn costs more and answers more slowly.")
+        else:
+            p2.append(f"An average call carries {share:.0f}% of the {_tok_text(limit)} token context "
+                      f"window of {top.get('model') or 'the active model'}, so there is room before "
+                      f"compaction begins.")
+    elif per_call_prompt:
+        p2.append(f"An average call carries {_tok_text(per_call_prompt)} prompt tokens; with no context "
+                  f"limit in the price table, that working set is the number to compare across models.")
+    p2.append("The levers, in the order they usually pay off: raise the cache hit rate (Cache tab), run "
+              "routine turns on a cheaper model (Model board), and cut what has to be loaded into "
+              "context every turn (skills, SOUL.md, long tool output).")
+    return [p1, " ".join(p2)]
+
+
+def cache_summary(cache: dict) -> list[str]:
+    """Two paragraphs reading a prompt-cache report: what the cache absorbed, and what it means."""
+    t = cache.get("totals") or {}
+    project = cache.get("project") or "this project"
+    prompt = int(t.get("prompt") or 0)
+    cached = int(t.get("cache_read") or 0)
+    fresh = int(t.get("fresh") or 0)
+    write = int(t.get("cache_write") or 0)
+    calls = int(t.get("calls") or 0)
+    sessions = int(t.get("sessions") or 0)
+    hit = float(t.get("hit_pct") or 0.0)
+    window = cache.get("window_days") or USAGE_DAYS
+    models = cache.get("models") or []
+    unpriced = cache.get("unpriced_models") or []
+    priced = int(cache.get("priced_models") or 0)
+    if not prompt and not write:
+        return [f"{project} has no prompt-cache traffic recorded yet: every call so far was a single "
+                f"prompt with no reusable prefix, so there is nothing for the provider to cache."]
+    p1 = (f"The prompt cache answered {hit}% of this project's prompt traffic in the last {window} "
+          f"days: {_tok_text(cached)} of {_tok_text(prompt)} prompt tokens were cache reads and "
+          f"{_tok_text(fresh)} tokens had to be sent fresh, across {calls:,} calls in {sessions} "
+          f"session(s).")
+    if write:
+        p1 += (f" The provider also wrote {_tok_text(write)} tokens into the cache, "
+               + ("which carries no price row, so it is reported in tokens only."
+                  if cache.get("write_usd") is None else
+                  f"at a cost of about {_usd_text(cache.get('write_usd'))}."))
+    if priced:
+        p1 += (f" Served from the cache those {_tok_text(cached)} tokens cost about "
+               f"{_usd_text(cache.get('paid_usd'))}, where the same tokens as fresh input would have "
+               f"cost {_usd_text(cache.get('fresh_usd'))}: the cache saved roughly "
+               f"{_usd_text(cache.get('saved_usd'))}.")
+    else:
+        p1 += (" No model in this project has a price row, so the saving is left in tokens instead of "
+               "a dollar figure.")
+
+    p2 = []
+    if models:
+        top = models[0]
+        p2.append(f"Most cache traffic belongs to {top.get('model')} "
+                  f"({_pct(top.get('cache_read'), cached)} of the cache reads over "
+                  f"{top.get('sessions')} session(s)); the per-model table shows the rest.")
+    if hit >= 75.0:
+        p2.append(f"A hit rate of {hit}% is high: consecutive calls share a stable prefix, so the "
+                  f"system prompt, skills and early turns keep being served from the provider cache "
+                  f"instead of being paid for again at the full input price.")
+    elif hit >= 40.0:
+        p2.append(f"A hit rate of {hit}% is mid-range: part of the prefix is reused and part of it "
+                  f"changes between calls, which is what edits to SOUL.md or skills, tool output "
+                  f"landing early in the prompt, or sessions too short to warm the cache look like.")
+    else:
+        p2.append(f"A hit rate of {hit}% is low: the prefix the provider could cache is mostly being "
+                  f"rewritten, so short sessions, a changed system prompt or long tool results "
+                  f"inserted before the cached part are the things to look at first.")
+    if priced and prompt:
+        spend = float(cache.get("paid_usd") or 0.0) + float(cache.get("fresh_usd") or 0.0)
+        if spend > 0:
+            p2.append(f"Against the prompt bill, the cache kept {_pct(cache.get('saved_usd'), spend)} "
+                      f"out of what the same traffic would otherwise have cost.")
+    if unpriced:
+        p2.append(f"The money columns cover the priced models only: no price row exists for "
+                  f"{', '.join(unpriced)}.")
+    p2.append("One thing to keep in mind: the cache belongs to the provider, and how long an entry "
+              "lives or what counts as a reusable prefix are its rules rather than herman's, so read "
+              "the hit rate as a symptom of how the sessions are shaped, not as a setting.")
+    return [p1, " ".join(p2)]
+
+
+def overview_summary(over: dict) -> list[str]:
+    """Two paragraphs reading the all-project usage report behind the dashboard card."""
+    t = over.get("totals") or {}
+    projects = over.get("projects") or []
+    models = over.get("models") or []
+    days = over.get("days") or []
+    busy = _active_days(days)
+    window = len(days) or USAGE_DAYS
+    total = int(t.get("total") or 0)
+    calls = int(t.get("calls") or 0)
+    sessions = int(t.get("sessions") or 0)
+    fresh = int(t.get("input") or 0)
+    cached = int(t.get("cache_read") or 0)
+    if not total and not calls:
+        return ["No project has recorded model usage yet, so there is nothing to analyse. The numbers "
+                "appear as soon as a session reports its first tokens."]
+    per_day = total / len(busy) if busy else 0
+    top_p = max(projects, key=lambda p: int(p.get("total") or 0)) if projects else {}
+    top_m = models[0] if models else {}
+    top_day = max(days, key=lambda d: int(d.get("total") or 0), default={})
+    p1 = (f"Across {len(projects)} project(s) with recorded usage, {_tok_text(total)} tokens were "
+          f"consumed in the last {window} days: {_tok_text(fresh)} fresh input plus "
+          f"{_tok_text(t.get('output') or 0)} output, over {calls:,} calls and {sessions} session(s), "
+          f"on {len(busy)} active day(s) at about {_tok_text(per_day)} tokens a day.")
+    if top_p.get("project"):
+        p1 += (f" {top_p['project']} is the heaviest consumer at {_pct(top_p.get('total'), total)} of "
+               f"the tokens, and {top_m.get('model') or 'the top model'} carries "
+               f"{_pct(top_m.get('total'), total)} of the fleet total on its own.")
+    if top_day.get("day"):
+        p1 += f" The busiest day was {top_day['day']} with {_tok_text(top_day.get('total'))} tokens."
+
+    p2 = []
+    if t.get("est_usd") is not None:
+        p2.append(f"At list prices the fleet costs about {_usd_text(t.get('est_usd'))} over that window "
+                  f"(a third-party price estimate, not an invoice).")
+    else:
+        p2.append("There is no fleet-wide cost estimate: at least one model in use has no price row, "
+                  "so only the token counts are comparable.")
+    if fresh + cached:
+        p2.append(f"The cache absorbed {_pct(cached, fresh + cached)} of all prompt traffic.")
+    if top_p.get("project") and int(top_p.get("total") or 0) * 2 > total:
+        p2.append(f"Consumption is concentrated: {top_p['project']} alone is more than half of "
+                  f"everything, so a change in how that project works shows up in this total at once.")
+    elif projects:
+        p2.append(f"No single project dominates: the heaviest is {_pct(top_p.get('total'), total)} of "
+                  f"the total, so the usage is spread across the fleet.")
+    dupes = over.get("shared_history") or []
+    if dupes:
+        p2.append("Two profiles here share the same history rows ("
+                  + ", ".join(f"{d['a']} and {d['b']}, {d['shared_sessions']} sessions" for d in dupes)
+                  + f"), and the {_tok_text(over.get('duplicate_total'))} tokens they would double "
+                    f"count are already removed from the total above.")
+    unpriced = [m.get("model") for m in models if m.get("est_usd") is None]
+    if unpriced:
+        p2.append(f"The cost line covers the priced models only: no price row for "
+                  f"{', '.join([m for m in unpriced if m])}.")
+    p2.append("Read this as the fleet-level picture, then use the per-project table to see where it "
+              "comes from: the Insights board breaks one project down by model, day and cache "
+              "behaviour.")
+    return [p1, " ".join(p2)]
+
+
+def do_summary(scope: str, name: str | None = None):
+    """Print the analysis the panel's buttons show: one project's usage or cache, or the whole fleet."""
+    scope = (scope or "").strip().lower()
+    if scope in ("overview", "all", "fleet", "dashboard"):
+        data = usage_overview()
+        paras = overview_summary(data)
+        title = f"analysis · all projects · token usage (last {USAGE_DAYS} days)"
+    elif scope in ("cache", "prompt-cache"):
+        if not name:
+            die("name a project: " + f"{PROG} --summary cache <name>")
+        ensure_profile(name)
+        data = cache_analytics(name)
+        paras = cache_summary(data)
+        title = f"analysis · {name} · prompt cache (last {USAGE_DAYS} days)"
+    elif scope in ("usage", "tokens"):
+        if not name:
+            die("name a project: " + f"{PROG} --summary usage <name>")
+        ensure_profile(name)
+        data = usage_report(name)
+        paras = usage_summary(data)
+        title = f"analysis · {name} · token usage (last {USAGE_DAYS} days)"
+    else:
+        die("usage: " + f"{PROG} --summary usage|cache <project>   or   {PROG} --summary overview")
+        return
+    print()
+    print_frame(title, _para_lines(paras))
+
+
 def search_history(name: str, query: str, limit: int = 40) -> dict:
     """Full-text search over a project's messages (FTS5 index, LIKE as the fallback)."""
     q = (query or "").strip()
@@ -4444,12 +4759,18 @@ _herman() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --tidy --logs --audit --unused --status web completion --dry-run -y --yes -v --verbose --json -h --help"
+  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --summary --tidy --logs --audit --unused --status web completion model git access kill stop sync refresh security sec history remove rm delete --stats --delete-message --delete-session --delete-matching --delete-all --session --all --fix --dry-run -y --yes -v --verbose --json -h --help"
   case "${prev}" in
-    -u|--use|-i|--info|-d|--doctor|-r|--remove|-C|--cwd|--usage|--logs|--audit|--alias)
+    -u|--use|-i|--info|-d|--doctor|-r|--remove|-C|--cwd|--usage|--logs|--audit|--alias|remove|rm|delete|history|kill|stop|sync|refresh|security|sec)
       COMPREPLY=( $(compgen -W "$(_herman_projects)" -- "${cur}") ); return 0 ;;
     -b|--backup)
       COMPREPLY=( $(compgen -W "$(_herman_projects) --all" -- "${cur}") ); return 0 ;;
+    --delete-message|--delete-session)
+      return 0 ;;
+    --delete-matching)
+      return 0 ;;
+    --summary)
+      COMPREPLY=( $(compgen -W "usage cache overview $(_herman_projects)" -- "${cur}") ); return 0 ;;
     -p|--project|--rename|--from|--alias-name)
       return 0 ;;
   esac
@@ -4485,6 +4806,8 @@ _herman() {
     '-b[back up]:project:_herman_projects'
     '-C[workdir]:project:_herman_projects'
     '--usage[usage]:project:_herman_projects'
+    '--summary[usage analysis]:scope or project:(usage cache overview)'
+    '--summary[usage analysis]:scope or project:(usage cache overview)'
     '--logs[logs]:project:_herman_projects'
     '--tidy[tidy]:project:_herman_projects'
     'web[web panel]'
@@ -5473,6 +5796,12 @@ def main(argv: list[str]) -> int:
         name = val("--usage")
         do_usage(name or (rest[1] if len(rest) > 1 and not rest[1].startswith("-") else None),
                  days=int(val("--days", 30) or 30), dry=dry)
+        return 0
+    if has("--summary"):
+        i = rest.index("--summary")
+        scope = rest[i + 1] if i + 1 < len(rest) and not rest[i + 1].startswith("-") else ""
+        name = rest[i + 2] if i + 2 < len(rest) and not rest[i + 2].startswith("-") else None
+        do_summary(scope, name)
         return 0
     if "--describe" in rest:
         i = rest.index("--describe")

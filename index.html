@@ -219,6 +219,8 @@
 
   /* ---------- usage tiles, bar charts, model bars, search hits ---------- */
   .ucard-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap}
+  .anrow{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin:var(--s2) 0 0}
+  .anrow .hint{max-width:560px;margin:0}
   .utiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:var(--s2);
           margin:var(--s2) 0 var(--s3)}
   .utile{border:1px solid var(--line2);border-radius:var(--r-ctl);padding:8px 10px;background:var(--surface2)}
@@ -641,6 +643,10 @@
           <div class="ubars" id="usage-models"></div>
           <div class="subhead">Per project</div>
           <div class="scrollx"><table id="usage-projects"></table></div>
+          <div class="anrow">
+            <button class="tiny ghost" onclick="run('summary-overview')" title="Read two paragraphs about these numbers: what the fleet consumed, what it costs and where it is concentrated. Nothing shows until you ask; the text lands in the output console below.">Read the analysis</button>
+            <span class="hint">Analysis of the table above, in the output console.</span>
+          </div>
         </div>
 
       </section>
@@ -787,6 +793,10 @@
             <div id="ins-usage-chart" class="chartwrap"></div>
             <div class="subhead">Previously used models</div>
             <div class="scrollx"><table id="ins-usage-history"></table></div>
+            <div class="anrow">
+              <button class="tiny ghost" onclick="runFocus('summary-usage')" title="Read two paragraphs about the numbers above for this project: consumption, cost, cache share and how close an average call sits to the context window. The text lands in the output console below.">Read the analysis</button>
+              <span class="hint">What this project's consumption means, in the output console.</span>
+            </div>
           </div>
         </div>
 
@@ -868,6 +878,10 @@
             <div class="scrollx"><table id="cache-day-table"></table></div>
             <div class="subhead">Per model</div>
             <div class="scrollx"><table id="cache-model-table"></table></div>
+            <div class="anrow">
+              <button class="tiny ghost" onclick="runFocus('summary-cache')" title="Read two paragraphs about the cache numbers above: what the cache absorbed, what it saved and what the hit rate says about how the sessions are shaped.">Read the analysis</button>
+              <span class="hint">What the hit rate and the saving mean, in the output console.</span>
+            </div>
           </div>
         </div>
 
@@ -2957,6 +2971,8 @@ const LABELS = {
   'history-delete-all': 'Deleting project history…',
   info: 'Reading project info…', backup: 'Backing up project…', 'backup-all': 'Backing up all projects…',
   tidy: 'Tidying project…', 'tidy-all': 'Tidying all projects…', usage: 'Collecting usage…',
+  'summary-overview': 'Reading the usage analysis…', 'summary-usage': 'Reading the usage analysis…',
+  'summary-cache': 'Reading the cache analysis…',
   logs: 'Reading log…', audit: 'Auditing memory and skills…', doctor: 'Running health check…',
   'doctor-all': 'Checking every project…', remove: 'Deleting project…', create: 'Creating project…',
   list: 'Listing projects…', 'model-set': 'Updating model…', git: 'Reading git status…',
