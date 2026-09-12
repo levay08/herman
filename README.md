@@ -3,20 +3,12 @@
 **hermes-agent · simple task manager**
 
 herman is a small, dependency-free manager for your
-[Hermes Agent](https://hermes-agent.nousresearch.com/docs) projects (profiles): one CLI plus one
-local web panel, on top of the `hermes` binary you already have. It never reimplements the agent and
-never edits your Hermes config by hand: changes go through `hermes config set`, `hermes profile use`
-and `hermes profile delete`.
-
-- every project in one place: create, enter, back up, inspect, rename, delete
-- live view: which project has a session open, which gateway runs, what each project costs
-- read-only analytics from your own `state.db`: tokens per model and per day, cache ratio, tool
-  counters, error digest, history search
-- local web panel (loopback only, token plus cookie, POST-only mutations) with its own security
-  battery
-
-Nothing is uploaded anywhere. herman reads what Hermes already writes and, when you ask it to, runs
-the Hermes CLI.
+[Hermes Agent](https://hermes-agent.nousresearch.com/docs) projects (profiles): one CLI plus one local
+web panel, on top of the `hermes` binary you already have. It keeps every project in one place
+(create, enter, back up, inspect, delete), shows what runs and what each one costs, and reads the
+analytics Hermes already writes to `state.db`. It never reimplements the agent, never edits your
+config by hand (changes go through `hermes config set`, `hermes profile use` and
+`hermes profile delete`), and it uploads nothing anywhere.
 
 ## Requirements
 
@@ -64,26 +56,6 @@ herman --usage [--days N]              tokens and estimated cost
 herman -b <name|--all>                 back up to ~/Documents/herman-backup/
 herman -x <file> [--as name]           restore a backup
 herman --tidy [--all] | --logs <name>  free disk space / read the agent log
-```
-
-**Git and access**
-
-```sh
-herman git [name] ...        repo status, init, identity, remotes, credential helper
-herman -C <name> [path]      show or set the workdir (terminal.cwd in the Hermes config)
-herman access [name]         API keys, SSH keys, known hosts, git credentials, live connections
-herman access grant user@host   key + ssh-config entry + ssh-copy-id in one step
-herman access set-env <p> <VAR> add or update an API key in the project .env (0600)
-```
-
-**Web and maintenance**
-
-```sh
-herman web [--port 9120]     start the panel and open it
-herman web --url             print the full URL including the access token
-herman web --status | --stop which panels run / stop one
-herman security [--json]     security regression battery for the running panel
-herman -h                    every command, including the ones not shown here
 ```
 
 ## Web panel
