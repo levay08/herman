@@ -219,8 +219,12 @@
 
   /* ---------- usage tiles, bar charts, model bars, search hits ---------- */
   .ucard-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap}
-  .anrow{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin:var(--s2) 0 0}
-  .anrow .hint{max-width:560px;margin:0}
+  .hd-act{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+  .subhead.act{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap}
+  .subhead.act button{text-transform:none;letter-spacing:0;font-weight:600}
+  .sum-body{margin:var(--s2) 0 0}
+  .sum-body p{margin:0 0 var(--s3);font-size:13.4px;line-height:1.62;overflow-wrap:anywhere}
+  .sum-body p:last-child{margin:0}
   .utiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:var(--s2);
           margin:var(--s2) 0 var(--s3)}
   .utile{border:1px solid var(--line2);border-radius:var(--r-ctl);padding:8px 10px;background:var(--surface2)}
@@ -633,7 +637,10 @@
         <div class="card pad" id="usage-card" style="margin-top:16px">
           <div class="ucard-head">
             <div class="subhead" style="margin:0;border-top:0;padding-top:0">Token usage · all projects</div>
-            <button class="tiny ghost" onclick="loadUsageAll()" title="Refresh the usage numbers.">Refresh</button>
+            <div class="hd-act">
+              <button class="tiny" onclick="openSummary('overview')" title="Open the analysis of these numbers: what the fleet consumed, how the work was done, and what to change. Escape or the close button ends it.">Read summary</button>
+              <button class="tiny ghost" onclick="loadUsageAll()" title="Refresh the usage numbers.">Refresh</button>
+            </div>
           </div>
           <p class="hint" id="usage-note">…</p>
           <div class="utiles" id="usage-tiles"></div>
@@ -643,10 +650,6 @@
           <div class="ubars" id="usage-models"></div>
           <div class="subhead">Per project</div>
           <div class="scrollx"><table id="usage-projects"></table></div>
-          <div class="anrow">
-            <button class="tiny ghost" onclick="run('summary-overview')" title="Read two paragraphs about these numbers: what the fleet consumed, what it costs and where it is concentrated. Nothing shows until you ask; the text lands in the output console below.">Read the analysis</button>
-            <span class="hint">Analysis of the table above, in the output console.</span>
-          </div>
         </div>
 
       </section>
@@ -789,14 +792,13 @@
             <p class="hint" id="ins-usage-note"></p>
             <div class="subhead">Usage per model</div>
             <div class="ubars" id="ins-usage-models"></div>
-            <div class="subhead">Tokens per day (30 days)</div>
+            <div class="subhead act">
+              <span>Tokens per day (30 days)</span>
+              <button class="tiny" onclick="openSummary('usage')" title="Open the analysis for the focus project: what was consumed, what the operator and the agent did to consume it, and what to change. Escape or the close button ends it.">Read summary</button>
+            </div>
             <div id="ins-usage-chart" class="chartwrap"></div>
             <div class="subhead">Previously used models</div>
             <div class="scrollx"><table id="ins-usage-history"></table></div>
-            <div class="anrow">
-              <button class="tiny ghost" onclick="runFocus('summary-usage')" title="Read two paragraphs about the numbers above for this project: consumption, cost, cache share and how close an average call sits to the context window. The text lands in the output console below.">Read the analysis</button>
-              <span class="hint">What this project's consumption means, in the output console.</span>
-            </div>
           </div>
         </div>
 
@@ -873,15 +875,14 @@
             <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Prompt cache: hit rate, fresh input and what it saved</div>
             <div class="utiles" id="cache-tiles"></div>
             <p class="hint" id="cache-note"></p>
-            <div class="subhead">Cache read per day (fresh input for each day is in the table below)</div>
+            <div class="subhead act">
+              <span>Cache read per day (fresh input for each day is in the table below)</span>
+              <button class="tiny" onclick="openSummary('cache')" title="Open the analysis of the cache numbers: what the cache absorbed, how the sessions behind it look, and what to change. Escape or the close button ends it.">Read summary</button>
+            </div>
             <div id="cache-chart" class="chartwrap"></div>
             <div class="scrollx"><table id="cache-day-table"></table></div>
             <div class="subhead">Per model</div>
             <div class="scrollx"><table id="cache-model-table"></table></div>
-            <div class="anrow">
-              <button class="tiny ghost" onclick="runFocus('summary-cache')" title="Read two paragraphs about the cache numbers above: what the cache absorbed, what it saved and what the hit rate says about how the sessions are shaped.">Read the analysis</button>
-              <span class="hint">What the hit rate and the saving mean, in the output console.</span>
-            </div>
           </div>
         </div>
 
@@ -1134,6 +1135,15 @@
           <button class="danger ghost" onclick="deleteThisSession()" title="herman history <project> --delete-session <id> · deletes the whole session this message belongs to.">Delete session</button>
         </div>
         <button class="modal-x" onclick="closeMsg()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+      </div>
+    </div>
+
+    <div class="modal" id="sum-modal" hidden>
+      <div class="modal-card card pad wide">
+        <h3 id="sum-head">Analysis</h3>
+        <p class="hint" id="sum-meta">Reading the numbers…</p>
+        <div class="sum-body" id="sum-body"></div>
+        <button class="modal-x" onclick="closeSum()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
       </div>
     </div>
 
@@ -2660,6 +2670,37 @@ async function openMessage(msgId){
   } catch (e) { setStatus('error', 'Could not load that message.'); }
 }
 function closeMsg(){ closeModal('msg-modal'); }
+/* ---------- analysis dialog (the Read summary buttons) --------------------------------------- */
+function escHtml(s){
+  return String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+}
+async function openSummary(scope){
+  /* scope is overview (the whole fleet) or usage/cache for the focus project, and the text comes
+     from /api/summary as unwrapped paragraphs, so the dialog does the typesetting. */
+  const name = scope === 'overview' ? '' : (focusProject || '');
+  if (scope !== 'overview' && !name){ setStatus('error', 'Pick a focus project first.'); return; }
+  document.getElementById('sum-head').textContent = 'Analysis';
+  document.getElementById('sum-meta').textContent = 'Reading the numbers…';
+  document.getElementById('sum-body').innerHTML = '';
+  openModal('sum-modal');
+  try {
+    const url = `/api/summary?t=${TOKEN}&scope=${encodeURIComponent(scope)}`
+              + (name ? `&name=${encodeURIComponent(name)}` : '');
+    const d = await (await fetch(url)).json();
+    if (d.error){
+      document.getElementById('sum-meta').textContent = d.error;
+      document.getElementById('sum-body').innerHTML = '<p class="hint">Nothing to analyse here yet.</p>';
+      return;
+    }
+    document.getElementById('sum-head').textContent = d.title || 'Analysis';
+    document.getElementById('sum-meta').textContent = d.meta || '';
+    document.getElementById('sum-body').innerHTML =
+      (d.paragraphs || []).map(p => '<p>' + escHtml(p) + '</p>').join('');
+  } catch (e) {
+    document.getElementById('sum-meta').textContent = 'Could not read the analysis: ' + e;
+  }
+}
+function closeSum(){ closeModal('sum-modal'); }
 function copyMsg(){
   const body = document.getElementById('msg-body').textContent || '';
   const head = (msgContext && msgContext.msg
@@ -2971,8 +3012,6 @@ const LABELS = {
   'history-delete-all': 'Deleting project history…',
   info: 'Reading project info…', backup: 'Backing up project…', 'backup-all': 'Backing up all projects…',
   tidy: 'Tidying project…', 'tidy-all': 'Tidying all projects…', usage: 'Collecting usage…',
-  'summary-overview': 'Reading the usage analysis…', 'summary-usage': 'Reading the usage analysis…',
-  'summary-cache': 'Reading the cache analysis…',
   logs: 'Reading log…', audit: 'Auditing memory and skills…', doctor: 'Running health check…',
   'doctor-all': 'Checking every project…', remove: 'Deleting project…', create: 'Creating project…',
   list: 'Listing projects…', 'model-set': 'Updating model…', git: 'Reading git status…',
@@ -3197,8 +3236,8 @@ function submitPw(){
   grantPost(pwTarget.user, pwTarget.host, pw);
 }
 document.addEventListener('keydown', e => {
-  const modal = ['pw-modal', 'proj-modal', 'other-modal', 'src-modal', 'create-modal', 'msg-modal']
-    .find(id => !document.getElementById(id).hidden);
+  const modal = ['pw-modal', 'proj-modal', 'other-modal', 'src-modal', 'create-modal', 'msg-modal',
+                 'sum-modal'].find(id => !document.getElementById(id).hidden);
   if (!modal) return;
   if (e.key === 'Escape'){
     if (modal === 'pw-modal') closePw();
@@ -3206,6 +3245,7 @@ document.addEventListener('keydown', e => {
     else if (modal === 'src-modal') dismissSources();
     else if (modal === 'create-modal') closeCreateModal();
     else if (modal === 'msg-modal') closeMsg();
+    else if (modal === 'sum-modal') closeSum();
     else closeOther();
   }
   if (modal === 'create-modal' && e.key === 'Enter'){
