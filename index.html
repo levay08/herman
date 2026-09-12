@@ -201,6 +201,15 @@
   .tile .k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim2)}
   .tile .v{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
   .tile .d{font-size:12px;color:var(--dim)}
+  /* A tile that stands for a board is clickable: the whole card (and every line in it) opens
+     that board. The hover is painted with the same tint the "default" project card carries on the
+     Projects board, so the affordance is the panel's own colour, not a new one. */
+  .tile-act{cursor:pointer}
+  .tile-act .k{display:flex;align-items:center;gap:8px}
+  .tile-act .tile-open{margin-left:auto;text-transform:none;letter-spacing:0;font-size:11px;
+                       font-weight:650;color:var(--teal-dark)}
+  .tile-act:hover{transform:translateY(-1px);border-color:var(--default-line);background:var(--default-soft)}
+  .tile-act:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
 
   /* ---------- grids of cards ---------- */
   /* ---------- projects: cards on the left, the create form in its own framed column ---------- */
@@ -1553,17 +1562,27 @@ function renderProjects(d){
 function tiles(d){
   const el = document.getElementById('tiles');
   el.textContent = '';
-  const mk = (k, val, sub) => {
+  const mk = (k, val, sub, route) => {
     const c = document.createElement('div');
-    c.className = 'card tile';
+    c.className = 'card tile' + (route ? ' tile-act' : '');
     const a = document.createElement('div'); a.className = 'k'; a.textContent = k;
     const b = document.createElement('div'); b.className = 'v'; b.textContent = val;
     const s = document.createElement('div'); s.className = 'd'; s.textContent = sub || '';
-    c.append(a, b, s); return c;
+    c.append(a, b, s);
+    if (route){
+      /* the whole tile opens the board, including every text line inside it */
+      c.tabIndex = 0; c.setAttribute('role', 'button');
+      c.title = 'Open the Projects board: one card per Hermes profile.';
+      c.onclick = () => navigate(route);
+      c.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); navigate(route); } };
+      const o = document.createElement('span'); o.className = 'tile-open'; o.textContent = 'open ›';
+      a.appendChild(o);
+    }
+    return c;
   };
   el.append(
     mk('Hermes active profile', d.active, 'sticky profile, set with hermes profile use'),
-    mk('Projects', d.projects.length, 'isolated profiles'),
+    mk('Projects', d.projects.length, 'isolated profiles', 'projects'),
     mk('Engine', d.engine, 'Hermes Agent installed'),
     mk('Dashboard', dashInfo.running ? 'running' : 'stopped', dashInfo.running ? dashInfo.url : 'start it from the sidebar')
   );
