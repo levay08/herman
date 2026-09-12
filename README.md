@@ -5,10 +5,11 @@
 herman is a small, dependency-free manager for your
 [Hermes Agent](https://hermes-agent.nousresearch.com/docs) projects (profiles): one CLI plus one local
 web panel, on top of the `hermes` binary you already have. It keeps every project in one place
-(create, enter, back up, inspect, delete), shows what runs and what each one costs, and reads the
-analytics Hermes already writes to `state.db`. It never reimplements the agent, never edits your
-config by hand (changes go through `hermes config set`, `hermes profile use` and
-`hermes profile delete`), and it uploads nothing anywhere.
+(create, enter, back up, inspect, delete), shows what runs and what each one costs, reads the analytics
+Hermes already writes to `state.db`, and turns those token and prompt-cache numbers into plain English:
+how you and the agent actually got there, and what to change next time. It never reimplements the
+agent, never edits your config by hand (changes go through `hermes config set`, `hermes profile use`
+and `hermes profile delete`), and it uploads nothing anywhere.
 
 ## Requirements
 
