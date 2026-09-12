@@ -88,6 +88,8 @@ herman -h                    every command, including the ones not shown here
 
 ## Web panel
 
+![herman web panel](herman_web.png)
+
 ```sh
 herman web
 ```
