@@ -495,7 +495,7 @@
   .dock .spacer{flex:1}
   .spin{width:9px;height:9px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--teal);
         display:none}
-  .status.busy .spin{display:inline-block;animation:spin .7s linear infinite}
+  .status.busy .spin,.status.running .spin{display:inline-block;animation:spin .7s linear infinite}
   .status.ok .spin{display:inline-block;background:var(--ok);border-color:var(--ok);animation:none}
   .status.error .spin{display:inline-block;background:var(--danger);border-color:var(--danger);animation:none}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -521,6 +521,25 @@
   #out::-webkit-scrollbar-thumb:hover{background:var(--scroll-out-hover);background-clip:content-box}
   #out .out-empty{color:var(--dim2)}
   .dock.min #out,.dock.min .dock-grip,.dock.min .progress{display:none}
+
+  /* ---------- opening overlay (enter session) ---------- */
+  /* Entering a session spawns a terminal window plus a whole hermes process, so on a cold start
+     the session lease only lands in the grid a few seconds later. This overlay owns the screen
+     for exactly that wait and leaves on its own when the lease shows up; Escape or a click
+     dismisses it early, the wait itself keeps running and reports in the output dock. */
+  .boot{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:var(--scrim);
+        backdrop-filter:blur(2px);padding:var(--s4);animation:fade .16s ease}
+  .boot[hidden]{display:none}
+  .boot-card{width:min(380px,90vw);display:grid;justify-items:center;gap:var(--s3);
+             padding:var(--s5) var(--s5) var(--s4);text-align:center;cursor:pointer}
+  .boot-ring{width:48px;height:48px;border-radius:50%;border:4px solid var(--line-strong);
+             border-top-color:var(--teal);animation:spin .9s linear infinite}
+  .boot-title{font-size:14.6px;font-weight:700;color:var(--text)}
+  .boot-sub{font-size:12.6px;color:var(--dim);min-height:17px;overflow-wrap:anywhere}
+  .boot-bar{width:100%;height:3px;background:var(--line2);border-radius:var(--r-pill);overflow:hidden}
+  .boot-bar i{display:block;height:100%;width:38%;background:var(--teal);
+              border-radius:var(--r-pill);animation:slide 1.2s ease-in-out infinite}
+  .boot-note{font-size:11.4px;color:var(--dim2)}
 
   /* ---------- responsive ---------- */
   @media (max-width:1080px){
@@ -1268,6 +1287,16 @@
       </div>
     </div>
 
+    <div class="boot" id="boot" hidden role="status" aria-live="polite">
+      <div class="boot-card card" id="boot-card">
+        <div class="boot-ring" aria-hidden="true"></div>
+        <div class="boot-title" id="boot-title">Opening session</div>
+        <div class="boot-sub" id="boot-sub">starting up…</div>
+        <div class="boot-bar" aria-hidden="true"><i></i></div>
+        <div class="boot-note">Escape or click to hide this · the session keeps starting.</div>
+      </div>
+    </div>
+
     <div class="dock" id="dock">
       <div class="head">
         <span class="title">Output</span>
@@ -1327,7 +1356,9 @@ function resetOut(msg){ out.textContent = ''; if (msg) say(msg); }
 function setStatus(state, text){
   statusEl.className = 'status ' + state;
   statusText.textContent = text;
-  progress.className = 'progress' + (state === 'running' ? '' : ' idle');
+  /* The dock bar animates for every wait state, not only 'busy': 'running' is what most actions
+     (and the session open) use, and an unanimated bar there reads as a stalled panel. */
+  progress.className = 'progress' + (state === 'running' || state === 'busy' ? ' busy' : '');
 }
 const DOCK_MIN_KEY = 'herman.dock.min';
 const DOCK_MAX_RATIO = 0.46;   /* the dock never covers more than this share of the window */
@@ -1512,16 +1543,21 @@ async function refresh(){
 function projectsSig(d){
   return JSON.stringify(d.projects.map(p => [p.name, (p.sessions || []).map(s => s.id), p.active, p.gateway]));
 }
-async function pollLive(){
-  if (document.hidden) return;
+async function fetchLive(){
+  /* One shared read of the projects feed: pollLive takes it on a timer, the session-open overlay
+     takes it to watch its own lease land. Both render through the same signature guard, so the
+     grid still never re-renders without a real change. */
   try{
     const d = await (await fetch(`/api/projects?t=${TOKEN}`)).json();
-    if (reloadOnNewBuild(d)) return;
+    if (reloadOnNewBuild(d)) return null;
     const sig = projectsSig(d);
-    if (sig === liveSig) return;
-    liveSig = sig;
-    renderProjects(d);
-  }catch (e) { /* panel still fine, try again next tick */ }
+    if (sig !== liveSig){ liveSig = sig; renderProjects(d); }
+    return d;
+  }catch (e) { return null; }   /* panel still fine, try again next tick */
+}
+async function pollLive(){
+  if (document.hidden) return;
+  await fetchLive();
 }
 
 function reloadOnNewBuild(d){
@@ -3812,6 +3848,49 @@ function forgetCred(host){
   if (ans !== host){ setStatus('warn', 'Forget cancelled.'); return; }
   runPost('access-gitcred-rm', focusProject, {host: host, confirm: host});
 }
+/* ---------- opening overlay: the wait between the click and a live session ---------- */
+const BOOT_MIN_MS = 700;       /* a warm open must not flash the overlay in and out */
+const BOOT_WAIT_MS = 25000;    /* how long the terminal + hermes get to report a lease */
+let bootShownAt = 0;
+function bootEl(){ return document.getElementById('boot'); }
+function bootShow(name){
+  bootShownAt = Date.now();
+  document.getElementById('boot-title').textContent = 'Opening session';
+  document.getElementById('boot-sub').textContent = 'requesting a terminal window for ' + name + '…';
+  bootEl().hidden = false;
+}
+function bootMsg(text){ document.getElementById('boot-sub').textContent = text; }
+function bootHide(){
+  const el = bootEl();
+  if (!el || el.hidden) return;
+  /* Hiding early (Escape, a click) is allowed: only the screen changes, the open itself and its
+     watcher keep going and report in the output dock. */
+  const wait = Math.max(0, BOOT_MIN_MS - (Date.now() - bootShownAt));
+  setTimeout(() => { el.hidden = true; }, wait);
+}
+(function bindBootDismiss(){
+  const el = bootEl();
+  if (!el) return;
+  el.addEventListener('click', bootHide);
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') bootHide(); });
+})();
+function sessionIdsOf(name){
+  const p = (projects || []).find(x => x.name === name);
+  return p ? (p.sessions || []).map(s => s.id) : [];
+}
+async function waitForNewSession(name, known){
+  /* The API answers as soon as the window is spawned; the session lease lands a moment later, so
+     keep reading the projects feed until THIS profile reports an id we have not seen yet. */
+  const t0 = Date.now();
+  while (Date.now() - t0 < BOOT_WAIT_MS){
+    await new Promise(r => setTimeout(r, 700));
+    await fetchLive();
+    const fresh = sessionIdsOf(name).filter(id => known.indexOf(id) === -1);
+    if (fresh.length) return fresh[0];
+  }
+  return '';
+}
+
 async function openTerminal(name){
   /* Entering project B while project A still runs: ask first, and offer to close A. */
   const others = (projects || []).filter(p => p.name !== name && (p.sessions || []).length);
@@ -3819,17 +3898,40 @@ async function openTerminal(name){
   await openTerminalNow(name);
 }
 async function openTerminalNow(name){
+  const known = sessionIdsOf(name);      /* sessions this profile already had running */
   setStatus('running', 'Opening a terminal for ' + name + '…');
+  bootShow(name);
+  say('$ herman -u ' + name + '   (new terminal window)');
+  say('· launching a terminal window for ' + name + '…');
   try {
     const d = await (await fetch(`/api/open-terminal?t=${TOKEN}&name=${encodeURIComponent(name)}`)).json();
-    setStatus(d.ok ? 'done' : 'error', d.msg || (d.ok ? 'Session opened.' : 'Could not open a terminal.'));
-    if (d.ok){
-      say('✓ ' + d.msg);
-      /* Hermes writes the session lease a moment after the window opens, so re-check right away
-         instead of waiting for the next poll: the card's session count has to move on its own. */
-      [600, 1500, 3500, 6000].forEach(ms => setTimeout(pollLive, ms));
+    if (!d.ok){
+      bootHide();
+      const why = d.msg || d.error || 'Could not open a terminal.';
+      setStatus('error', why);
+      say('✗ ' + why);
+      return;
     }
-  } catch (e){ setStatus('error', 'Request failed: ' + e); }
+    say('· window launched · waiting for ' + name + ' to report its session lease…');
+    bootMsg('waiting for hermes ' + name + ' to come up (window, profile, state database)…');
+    const id = await waitForNewSession(name, known);
+    bootHide();
+    if (id){
+      say('✓ ' + d.msg + ' · session ' + id + ' is up, the terminal is ready');
+      setStatus('done', 'Session ' + id + ' is running for ' + name + '.');
+    } else {
+      say('! the terminal window opened, but no session lease showed up in '
+          + Math.round(BOOT_WAIT_MS / 1000) + 's · check that window');
+      setStatus('warn', 'Terminal opened for ' + name + ' · session not detected yet.');
+    }
+    /* The lease can land before or after the poll above, so re-check right away as well: the
+       card's session count has to move on its own. */
+    [600, 1500, 3500, 6000].forEach(ms => setTimeout(pollLive, ms));
+  } catch (e){
+    bootHide();
+    setStatus('error', 'Request failed: ' + e);
+    say('✗ request failed: ' + e);
+  }
 }
 async function openDashboard(){
   const b = document.getElementById('open-dash');

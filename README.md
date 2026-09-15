@@ -79,7 +79,10 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
 - **Dashboard** all-project overview plus total token usage
 - **Projects** one card per project (model, workdir, skills, memory, live session), with the note and
   the name editable on the card itself (the pencil beside the title renames the profile folder, its
-  shortcut command and herman's own notes); actions stream their output into the console at the bottom
+  shortcut command and herman's own notes); actions stream their output into the console at the bottom.
+  `Enter session` holds a loading overlay over the panel until that project's session lease appears in
+  the grid (Escape hides it early; the wait keeps reporting in the console), so a cold start never
+  looks like a dead button
 - **Model** current model, the **Endpoint** tab (pick one of the common provider APIs or type any
   OpenAI-compatible URL, test it before switching, and the model list follows it) and the model
   changer
