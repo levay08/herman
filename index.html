@@ -3073,7 +3073,10 @@ function card(p){
     big('Enter session', () => openTerminal(p.name), 'primary',
         'Opens a terminal window running this project (herman -u <project>).'),
     big('Details', () => openProj(p.name), '',
-        'Model, workdir, skills, memory, session and the remaining project commands.')
+        'Model, workdir, skills, memory, session and the remaining project commands.'),
+    big('Insights', () => openProjectInsights(p.name), '',
+        'Opens the Insights board on this project: token usage, activity, tools, context health, '
+        + 'cache and errors of ' + p.name + ' only.')
   );
   el.appendChild(row);
   return el;
@@ -3166,6 +3169,28 @@ async function otherCloseAndContinue(){
     }catch(e){ say('✗ ' + nm + ': ' + e); }
   }
   await openTerminalNow(t);
+}
+
+/* ---------- jump from a project card to that project's Insights ---------- */
+function openProjectInsights(name){
+  /* A card opens Insights for ITS project, not for whatever the focus dropdown holds: every
+     Insights tab (token usage, history search, activity, tools, context health, cache, errors)
+     reads the focus project, so the dropdown is set first and the route change then loads the
+     board for it. The sticky Hermes profile is deliberately left alone (no activateProject here):
+     reading one project's analytics is not a request to make it what `hermes profile use` picks,
+     that stays a move of the focus dropdown itself. */
+  const sel = document.getElementById('focus');
+  if (!sel || !(projects || []).some(p => p.name === name)){
+    setStatus('error', 'Project "' + name + '" is not in the current list · press Refresh.');
+    say('✗ project "' + name + '" is not in the current list');
+    return;
+  }
+  sel.value = name;
+  focusProject = name;
+  markFocusField();
+  navigate('insights');
+  setStatus('ok', 'Insights: ' + name + ' (focus project follows, the active profile does not)');
+  say('✓ insights for ' + name + '   (focus project follows, Hermes active project unchanged)');
 }
 
 /* ---------- project details modal ---------- */
