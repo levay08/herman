@@ -375,6 +375,11 @@
   .proj.default{background:var(--default-soft);border-color:var(--default-line)}
   .proj-head{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
   .proj-head h3{font-size:15px;font-weight:700}
+  /* The title keeps the description editor's pencil: hover reveals it, .editing keeps it visible
+     while the field is open (focus can move to the output dock without hiding the tick). */
+  .proj-name{display:inline-flex;align-items:center;gap:5px;min-width:0}
+  .name-input{font-size:14px;font-weight:700;min-height:28px;padding:3px 7px;width:186px;max-width:100%}
+  .proj-head.editing .desc-edit{opacity:1;pointer-events:auto}
   .tag{font-size:11px;font-weight:650;padding:2px 8px;border-radius:var(--r-pill);
        border:1px solid var(--line);background:var(--surface3);color:var(--dim)}
   .tag.ok{background:var(--teal-soft);border-color:var(--teal-line);color:var(--teal-dark)}
@@ -1152,6 +1157,7 @@
           <button id="proj-log" title="herman --logs <project> · last 60 log lines.">Log</button>
           <button id="proj-doctor" title="herman -d <project> · read-only health check.">Doctor</button>
           <button id="proj-backup" title="herman -b <project> · writes a dated archive.">Back up</button>
+          <button id="proj-rename" title="herman --rename <project> <new> · renames the profile folder, its wrapper command and herman notes; you type the new name to confirm.">Rename</button>
           <button class="danger" id="proj-delete" title="herman -r <project> · removes the profile; you type the project name to confirm.">Delete</button>
         </div>
         <button class="modal-x" onclick="closeProj()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
@@ -2982,7 +2988,34 @@ function card(p){
     + (p.name === DEFAULT_PROJECT ? ' default' : '');
   const head = document.createElement('div');
   head.className = 'proj-head';
-  const h = document.createElement('h3'); h.textContent = p.name; head.appendChild(h);
+  const nameWrap = document.createElement('span');
+  nameWrap.className = 'proj-name';
+  const h = document.createElement('h3'); h.textContent = p.name;
+  nameWrap.appendChild(h);
+  if (p.name !== DEFAULT_PROJECT){
+    /* Same affordance as the description pencil (hover reveals it, Enter or the tick saves, Escape
+       cancels), but a name is not a local note: it renames the profile on disk, so it goes through
+       renameProject() and the panel's own confirmation. The root profile carries no pencil because
+       Hermes cannot move the installation root. */
+    const tbtn = document.createElement('button');
+    tbtn.className = 'desc-edit name-edit';
+    tbtn.textContent = '✎';
+    tbtn.title = 'Rename this project: the profile folder, its wrapper command and herman notes all '
+      + 'follow the new name.';
+    tbtn.setAttribute('aria-label', 'Rename the project ' + p.name);
+    const tcan = document.createElement('button');
+    tcan.className = 'desc-edit name-edit desc-cancel';
+    tcan.textContent = '✕';
+    tcan.hidden = true;
+    tcan.title = 'Cancel this rename without changing anything (Escape does the same).';
+    tcan.setAttribute('aria-label', 'Cancel the rename of ' + p.name);
+    const tools = document.createElement('span');
+    tools.className = 'desc-tools';
+    tools.append(tbtn, tcan);
+    tbtn.onclick = ev => { ev.stopPropagation(); nameEdit(p, head, h, tbtn, tcan); };
+    nameWrap.appendChild(tools);
+  }
+  head.appendChild(nameWrap);
   if (p.active) head.appendChild(tag('active', 'ok'));
   head.appendChild(tag('gateway ' + p.gateway, p.gateway === 'up' ? 'ok' : 'warn'));
   const liveNow = p.sessions || [];
@@ -3181,6 +3214,13 @@ async function openProj(name){
   document.getElementById('proj-log').onclick = () => { closeProj(); run('logs', p.name); };
   document.getElementById('proj-doctor').onclick = () => { closeProj(); run('doctor', p.name); };
   document.getElementById('proj-backup').onclick = () => { closeProj(); run('backup', p.name); };
+  const rn = document.getElementById('proj-rename');
+  rn.disabled = p.name === DEFAULT_PROJECT;
+  rn.title = p.name === DEFAULT_PROJECT
+    ? 'The root profile IS the Hermes home folder: Hermes cannot move it, so it has no rename.'
+    : 'herman --rename ' + p.name + ' <new> · renames the profile folder, its wrapper command, the '
+      + 'sticky default and herman notes. You type the new name to confirm.';
+  rn.onclick = () => { closeProj(); renameProjectPrompt(p.name); };
   document.getElementById('proj-delete').onclick = () => { closeProj(); removeProject(p.name); };
   openModal('proj-modal');
 }
@@ -3232,6 +3272,7 @@ const LABELS = {
   tidy: 'Tidying project…', 'tidy-all': 'Tidying all projects…', usage: 'Collecting usage…',
   logs: 'Reading log…', audit: 'Auditing memory and skills…', doctor: 'Running health check…',
   'doctor-all': 'Checking every project…', remove: 'Deleting project…', create: 'Creating project…',
+  rename: 'Renaming project…',
   list: 'Listing projects…', 'model-set': 'Updating model…', git: 'Reading git status…',
   'model-set-endpoint': 'Writing the endpoint into the Hermes config…',
   'model-probe': 'Testing the endpoint…',
@@ -3295,7 +3336,7 @@ const MUTATING_ACTIONS = new Set([
   'cwd', 'git-init', 'git-set-workdir', 'git-set-user', 'git-set-remote', 'git-rm-remote',
   'git-set-helper', 'access-set-env', 'access-unset-env', 'access-new-key', 'access-revoke-key',
   'access-add-agent', 'access-revoke-agent', 'access-gitcred-add', 'access-gitcred-rm',
-  'model-set-endpoint',
+  'model-set-endpoint', 'rename',
 ]);
 async function run(action, name, extra, opts){
   /* State-changing actions are POSTed, read-only ones are fetched with GET; both answer the same
@@ -3584,6 +3625,120 @@ function removeProject(name){
   if (ans !== name){ setStatus('warn', 'Delete cancelled.'); return; }
   run('remove', name);
 }
+
+/* ---------- renaming a project (the profile itself) ---------- */
+function projectNameShape(name){
+  /* The shape the panel and the CLI accept for a profile name, checked here as well so a typo or an
+     impossible name is answered immediately instead of after a round trip. */
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name);
+}
+async function renameProject(old, next){
+  /* One implementation behind every entry point (the pencil on the card, the Rename button in the
+     Details dialog). A rename moves the profile folder, stops its gateway and replaces its wrapper
+     command, so the new name is typed back before anything runs and the server repeats both the
+     shape check and the confirmation. Returns true only when the project list really shows it. */
+  const to = (next || '').trim();
+  if (!to){ setStatus('error', 'Enter the new project name.'); return false; }
+  if (to === old){ setStatus('warn', 'That is the current name · nothing to change.'); return false; }
+  if (old === DEFAULT_PROJECT){
+    setStatus('error', 'The root profile IS your Hermes home folder: Hermes cannot move it, so it has no rename.');
+    return false;
+  }
+  if (!projectNameShape(to)){
+    setStatus('error', 'A name starts with a letter or a digit and may hold letters, digits, dot, dash and underscore (max 64).');
+    return false;
+  }
+  if ((projects || []).some(x => x.name === to)){
+    setStatus('error', 'Project "' + to + '" already exists · pick another name.');
+    return false;
+  }
+  const p = (projects || []).find(x => x.name === old);
+  const live = p ? (p.sessions || []).length : 0;
+  if (live){
+    const ans = prompt('Rename project "' + old + '" to "' + to + '"?\n\n'
+      + live + ' session(s) are running in it: Hermes stops the gateway of a profile it renames, and a '
+      + 'terminal that is already open keeps working from the moved folder until you restart it.\n\n'
+      + 'Type the new name to confirm:');
+    if (ans !== to){ setStatus('warn', 'Rename cancelled · nothing moved.'); return false; }
+  }
+  const wasFocus = focusProject;
+  if (focusProject === old) focusProject = to;      // the focus dropdown follows the rename
+  await run('rename', old, {new_name: to, confirm: to});
+  await refresh();
+  if (!(projects || []).some(x => x.name === to)){
+    if (wasFocus === old){ focusProject = wasFocus; await refresh(); }
+    setStatus('error', 'Project "' + old + '" was not renamed · the reason is in the output panel.');
+    return false;
+  }
+  if (wasFocus === old){
+    await Promise.all([loadFocus(), loadUsage(), loadInsights()]);   // the per-project boards moved
+    loadModelTabIfVisible();
+  }
+  setStatus('ok', 'Project renamed: ' + old + ' → ' + to);
+  return true;
+}
+function renameProjectPrompt(name){
+  /* The Details dialog holds no field to type into, so it asks for the new name first and then hands
+     it to renameProject(); the name the operator types there doubles as the confirmation. */
+  if (!name){ setStatus('error', 'Pick a focus project first.'); return; }
+  if (name === DEFAULT_PROJECT){
+    setStatus('error', 'The root profile IS your Hermes home folder: Hermes cannot move it, so it has no rename.');
+    return;
+  }
+  const p = (projects || []).find(x => x.name === name);
+  const live = p ? (p.sessions || []).length : 0;
+  const ans = prompt('Rename project "' + name + '"\n\n'
+    + (live ? live + ' session(s) are running in it.\n\n' : '')
+    + 'Type the new project name:');
+  if (ans === null || !ans.trim()){ setStatus('warn', 'Rename cancelled.'); return; }
+  renameProject(name, ans.trim());
+}
+function nameEdit(p, wrap, span, btn, cancel){
+  /* Pencil -> field, with a tick that saves and a cross that cancels (Enter saves, Escape cancels):
+     the same affordance as the description editor beside it. `finish()` puts every handler back, so
+     a second rename in the same page works without a reload. */
+  if (wrap.classList.contains('editing')) return;
+  wrap.classList.add('editing');
+  const input = document.createElement('input');
+  input.className = 'desc-input name-input';
+  input.maxLength = 64;
+  input.value = p.name;
+  input.placeholder = 'new project name';
+  input.title = 'Enter or the tick renames this project to what the field says; Escape or the cross cancels.';
+  span.replaceWith(input);
+  btn.textContent = '✓';
+  btn.classList.add('saving');
+  btn.title = 'Rename this project to what the field says (Enter does the same).';
+  if (cancel){
+    cancel.hidden = false;
+    cancel.onclick = ev => { ev.stopPropagation(); finish(false); };
+  }
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    if (save){
+      const renamed = await renameProject(p.name, input.value.trim());
+      if (!renamed){ done = false; input.focus(); return; }   // stay in edit mode, nothing lost
+    }
+    input.replaceWith(span);
+    btn.textContent = '✎';
+    btn.classList.remove('saving');
+    btn.title = 'Rename this project: the profile folder, its wrapper command and herman notes all '
+      + 'follow the new name.';
+    btn.onclick = ev => { ev.stopPropagation(); nameEdit(p, wrap, span, btn, cancel); };
+    if (cancel){ cancel.hidden = true; cancel.onclick = null; }
+    wrap.classList.remove('editing');
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape'){ e.preventDefault(); finish(false); }
+  });
+  btn.onclick = ev => { ev.stopPropagation(); finish(true); };
+}
+
 function setModel(){
   const model = v('model-name');
   if (!model){ setStatus('error', 'Pick a model from the list first.'); return; }

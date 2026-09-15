@@ -40,6 +40,7 @@ herman work                  enter its Hermes session (hands the terminal over t
 herman -u 2                  enter project number 2
 herman -l | -i [name]        list projects / inspect one
 herman -r <name>             delete a project and its profile
+herman --rename <old> <new>  rename a project (its profile, shortcut command and note follow)
 herman -d [name|--all]       doctor: read-only health check
 herman sync [--fix]          re-check herman against the installed Hermes
 ```
@@ -76,8 +77,9 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
 `HttpOnly` cookie on first load, so it does not stay in your address bar, history or link referrers.
 
 - **Dashboard** all-project overview plus total token usage
-- **Projects** one card per project (model, workdir, skills, memory, live session); actions stream
-  their output into the console at the bottom
+- **Projects** one card per project (model, workdir, skills, memory, live session), with the note and
+  the name editable on the card itself (the pencil beside the title renames the profile folder, its
+  shortcut command and herman's own notes); actions stream their output into the console at the bottom
 - **Model** current model, the **Endpoint** tab (pick one of the common provider APIs or type any
   OpenAI-compatible URL, test it before switching, and the model list follows it) and the model
   changer
@@ -87,8 +89,8 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
 - **Maintenance** backups, disk space, about
 
 Notes: the panel listens on loopback only, and everything inside it that changes state asks you to
-type the project name first. The Hermes dashboard (chat, config, keys, MCP, webhooks) stays at
-`hermes dashboard`, port 9119.
+type a name first (a delete and a rename ask for the name they are about to touch). The Hermes
+dashboard (chat, config, keys, MCP, webhooks) stays at `hermes dashboard`, port 9119.
 
 ## Docker
 

@@ -123,6 +123,15 @@ def main() -> int:
     st, _h, _b = call("POST", f"/api/action?t={token}&action=model-set-endpoint&target=default",
                       port=port, host=host)
     check("writing an endpoint without a project is refused", st, 400)
+    st, _h, _b = call("GET", f"/api/action?t={token}&action=rename&name=default&new_name=other",
+                      port=port, host=host)
+    check("a rename over GET is refused", st, 405)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=rename&name=default&new_name=other",
+                      port=port, host=host)
+    check("a rename without the typed confirmation is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=rename&name=default&new_name=--all"
+                             f"&confirm=--all", port=port, host=host)
+    check("a new name that looks like a flag is refused", st, 400)
     for label, query in (("a name that looks like a flag", "action=tidy&name=--all"),
                          ("a session id that looks like a flag", "action=kill-session&name=default&session=--all"),
                          ("a search term that looks like a flag", "action=history-delete-matching&name=default&q=--delete-all"),

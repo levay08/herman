@@ -427,6 +427,37 @@ def set_description(name: str, text: str, *, dry: bool = False) -> str:
 
 
 
+def rename_state(old: str, new: str) -> dict:
+    """Move herman's own bookkeeping from one project name to another.
+
+    Renaming a project only moves the Hermes profile directory; herman keeps its own per-project
+    facts in state.json (descriptions, the last project used, the recent history), so without this
+    the renamed project would come back with an empty description and the old name would linger in
+    the panel's history. Returns what actually moved, so the CLI can say it out loud.
+    """
+    st = load_state()
+    moved = {"description": False, "last": False, "history": 0}
+    desc = dict(st.get("descriptions") or {})
+    if old in desc:
+        desc[new] = desc.pop(old)
+        moved["description"] = True
+    st["descriptions"] = desc
+    if st.get("last") == old:
+        st["last"] = new
+        moved["last"] = True
+    before = list(st.get("history") or [])
+    moved["history"] = sum(1 for n in before if n == old)
+    if before:
+        hist: list[str] = []
+        for n in before:                   # rewrite the old name, then drop what that duplicated
+            n = new if n == old else n
+            if n not in hist:
+                hist.append(n)
+        st["history"] = hist[:10]
+    save_state(st)
+    return moved
+
+
 def set_last(name: str):
     st = load_state()
     st["last"] = name
@@ -1081,7 +1112,7 @@ command; the engine stays the Hermes you already have.
   {PROG} history <name> --delete-all      delete only the stored history, keep the project
      -r deletes memory, skills, config and sessions; --delete-all keeps the project but drops
      its recorded sessions, messages and token usage. Use -y to run either one unattended
-  {PROG} --rename <old> <new>
+  {PROG} --rename <old> <new>   rename a project: profile, shortcut command and note follow
   {PROG} --alias <name> [--alias-name x] [--alias-remove]
   {PROG} --describe <name> ["text"]     short note on the card (no text clears it)
   {PROG} -C, --cwd <name> [path]   show/set a project workdir
@@ -1579,10 +1610,41 @@ def do_unused(days: int = 30):
 
 
 def do_rename(old: str, new: str, *, dry: bool = False):
+    """Rename a project: alias, profile directory, sticky default and herman's own notes.
+
+    Refused up front when the name is impossible or already taken, because the engine's own error
+    arrives after it has started moving things. `default` is the installation root, so Hermes cannot
+    move it: for that one name the engine stores a display name and the id stays `default`, which the
+    output says plainly instead of pretending the project was renamed.
+    """
     ensure_profile(old)
+    new = (new or "").strip()
+    if old == new:
+        die(f"'{old}' is already the name; nothing to rename")
+    if old != DEFAULT_HERMES and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", new):
+        die("a project name starts with a letter or digit and holds letters, digits, dot, dash or "
+            "underscore (max 64 characters)")
+    if profile_exists(new):
+        die(f"project '{new}' already exists; pick another name")
+    running = profile_stats(old).get("sessions") or []
+    if running and not dry:
+        warn(f"{len(running)} session(s) are live in '{old}': Hermes stops its gateway, and a "
+             f"terminal already open keeps running from the moved path until you restart it")
     res = run_hermes(["profile", "rename", old, new], dry=dry)
-    if not dry and res.returncode == 0:
-        ok(f"{old} → {new}")
+    if dry or res.returncode != 0:
+        return
+    if not profile_exists(new):
+        ok(f"{old}: display name set to '{new}' (the profile id stays '{old}')")
+        return
+    moved = rename_state(old, new)
+    ok(f"{old} → {new}")
+    notes = [t for t, hit in (("description moved", moved["description"]),
+                              ("last project updated", moved["last"])) if hit]
+    if moved["history"]:
+        notes.append(f"{moved['history']} history entry/entries rewritten")
+    if notes:
+        print(dim("  herman state: " + ", ".join(notes)))
+    print(dim(f"  enter the renamed project: {PROG} -u {new}"))
 
 
 def do_alias(name: str, *, alias_name: str | None = None, remove: bool = False,
@@ -2303,6 +2365,7 @@ def cmd_web(argv: list[str]):
             # checked per parameter, secrets are exempt (they travel through the environment).
             shapes = {
                 "name": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                "new_name": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
                 "id": r"\d{1,12}",
                 "session": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}",
                 "var": r"[A-Za-z_][A-Za-z0-9_]{0,63}",
@@ -2344,6 +2407,7 @@ def cmd_web(argv: list[str]):
                 "git-set-helper", "access-set-env", "access-unset-env", "access-new-key",
                 "access-revoke-key", "access-add-agent", "access-revoke-agent",
                 "access-gitcred-add", "access-gitcred-rm", "model-set-endpoint",
+                "rename",
             }
             if action in mutating and method != "POST":
                 self._json({"error": f"'{action}' changes state: send it with POST"}, 405)
@@ -2362,6 +2426,7 @@ def cmd_web(argv: list[str]):
                 "doctor-all": lambda: ["-d", "--all"] + tail,
                 "remove": lambda: ["-r", name, "-y"] + tail,
                 "create": lambda: ["-p", name] + flags + tail,
+                "rename": lambda: ["--rename", name, only("new_name")] + tail,
                 "list": lambda: ["-l"] + tail,
                 "cwd": lambda: ["-C", name] + ([cwd] if cwd else []) + tail,
                 "model": lambda: ["model", name] + tail,
@@ -2409,6 +2474,10 @@ def cmd_web(argv: list[str]):
                 "access-new-key": only("label"),
                 "git-rm-remote": only("remote_name"),
                 "access-gitcred-rm": only("host"),
+                # A rename moves the profile directory, stops its gateway and replaces its wrapper
+                # command, so the new name is typed back: a mistyped or prefetched request cannot
+                # move a project by accident.
+                "rename": only("new_name"),
             }
             if action in confirm_targets:
                 want = confirm_targets[action]
