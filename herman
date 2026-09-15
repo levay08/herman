@@ -1357,8 +1357,9 @@ def do_create(name: str, *, clone: bool = False, clone_all: bool = False,
               clone_from: str | None = None, no_alias: bool = False,
               no_skills: bool = False, dry: bool = False):
     name = (name or "").strip().lower()      # hermes profile ids are lowercase
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
-        die("project name: lowercase letters/digits, no spaces (e.g. myproject)")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", name):
+        die(f"project name: {NAME_RULE} · {NAME_NOT} · received {name!r} "
+            f"(uppercase letters are lowered for you)")
     if name in list_profiles():
         die(f"project '{name}' already exists")
     args = ["profile", "create", name]
@@ -1622,8 +1623,7 @@ def do_rename(old: str, new: str, *, dry: bool = False):
     if old == new:
         die(f"'{old}' is already the name; nothing to rename")
     if old != DEFAULT_HERMES and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", new):
-        die("a project name starts with a letter or digit and holds letters, digits, dot, dash or "
-            "underscore (max 64 characters)")
+        die(f"new name: {NAME_RULE} · {NAME_NOT} · received {new!r}")
     if profile_exists(new):
         die(f"project '{new}' already exists; pick another name")
     running = profile_stats(old).get("sessions") or []
@@ -1902,6 +1902,111 @@ def is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(name).is_loopback
     except ValueError:
         return False
+
+
+def shape_class(spec: str) -> str:
+    """Characters a compact class like 'A-Za-z0-9._-' stands for ('' means the rule takes any text)."""
+    out, i = [], 0
+    while i < len(spec):
+        if i + 2 < len(spec) and spec[i + 1] == "-" and ord(spec[i]) < ord(spec[i + 2]):
+            out.extend(chr(c) for c in range(ord(spec[i]), ord(spec[i + 2]) + 1))
+            i += 3
+        else:
+            out.append(spec[i])
+            i += 1
+    return "".join(out)
+
+
+# What a project (Hermes profile) name may hold and what it may never hold. One wording for the CLI,
+# the API and the panel, so an operator reads the same rule wherever the name is refused.
+NAME_RULE = ("a project (Hermes profile) name: letters, digits, dot, dash and underscore only, "
+             "starting with a letter or a digit, at most 64 characters (example: archiveweb)")
+NAME_NOT = ("never allowed: spaces, slashes, colons, @, quotes, wildcards or any other punctuation, "
+            "and never a leading dash or dot (a name reads as one path segment and must not look "
+            "like a command line flag)")
+_NAMEISH_NOT = "never allowed: spaces, slashes, colons, @, quotes or other punctuation"
+_ORIGIN = "starting with a letter or a digit, at most 64 characters"
+
+# Every shaped parameter of the web API, with the rule text and the example the panel prints when a
+# value breaks its shape. `safe` is the character set the pattern accepts: it is what lets the message
+# name the characters the value actually carried. `max` is the length the pattern allows.
+SHAPE_RULES = {
+    "name": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", "rule": NAME_RULE, "not": NAME_NOT,
+             "safe": "A-Za-z0-9._-", "max": 64},
+    "new_name": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", "rule": NAME_RULE, "not": NAME_NOT,
+                 "safe": "A-Za-z0-9._-", "max": 64},
+    "remote_name": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                    "rule": "a git remote name: letters, digits, dot, dash and underscore only, "
+                            f"{_ORIGIN} (example: origin)",
+                    "not": _NAMEISH_NOT, "safe": "A-Za-z0-9._-", "max": 64},
+    "gateway": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                "rule": "a gateway id: letters, digits, dot, dash and underscore only, "
+                        f"{_ORIGIN} (example: telegram)",
+                "not": _NAMEISH_NOT, "safe": "A-Za-z0-9._-", "max": 64},
+    "provider": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                 "rule": "a provider id: letters, digits, dot, dash and underscore only, "
+                         f"{_ORIGIN} (example: custom)",
+                 "not": _NAMEISH_NOT, "safe": "A-Za-z0-9._-", "max": 64},
+    "id": {"re": r"\d{1,12}", "rule": "a message id: digits only, 1 to 12 of them (example: 42)",
+           "not": "never allowed: a sign, a dot, a space or any letter", "safe": "0-9", "max": 12},
+    "session": {"re": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}",
+                "rule": "a session id: letters, digits, dot, dash, underscore or colon, starting with "
+                        "a letter or a digit, at most 80 characters (example: 20260915_ab12)",
+                "not": _NAMEISH_NOT, "safe": "A-Za-z0-9._:-", "max": 80},
+    "var": {"re": r"[A-Za-z_][A-Za-z0-9_]{0,63}",
+            "rule": "an environment variable name: letters, digits and underscore, not starting with "
+                    "a digit, at most 64 characters (example: HERMES_API_KEY)",
+            "not": "never allowed: spaces, dots, dashes or anything besides letters, digits and "
+                   "underscore",
+            "safe": "A-Za-z0-9_", "max": 64},
+    "q": {"re": r"[^-].{0,199}",
+          "rule": "a search text: 1 to 200 characters; dashes inside the text are fine "
+                  "(example: release notes)",
+          "not": "never allowed: a leading dash, because the child process would read it as a flag",
+          "safe": "", "max": 200},
+    "path": {"re": r"/?[^\x00-\x1f]{0,399}",
+             "rule": "a filesystem path: up to 400 characters, absolute (it starts with /) or relative "
+                     "(example: /opt/example/repo)",
+             "not": "never allowed: control characters", "safe": "", "max": 400},
+    "url": {"re": r"[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\x00-\x1f]{1,380}",
+            "rule": "a URL: a scheme, then ://, then the host, up to 400 characters "
+                    "(example: https://github.com/levay08/herman.git)",
+            "not": "never allowed: a missing scheme (https:// is required here), spaces or control "
+                   "characters",
+            "safe": "", "max": 400},
+    "helper": {"re": r"[A-Za-z0-9][A-Za-z0-9._ /-]{0,63}",
+               "rule": "a git credential helper: letters, digits, dot, dash, underscore, slash or "
+                       "space, starting with a letter or a digit, at most 64 characters "
+                       "(example: /usr/lib/git-core/git-credential-libsecret)",
+               "not": "never allowed: control characters, quotes, backslashes or a colon",
+               "safe": "A-Za-z0-9._ /-", "max": 64},
+    "target": {"re": r"(?:default|none)|[A-Za-z][A-Za-z0-9+.\-]{1,15}://[^\x00-\x1f]{1,380}",
+               "rule": "either the word default, the word none, or a URL with its scheme "
+                       "(example: https://ai.paas.id/v1)",
+               "not": "never allowed: a bare host without a scheme, spaces or control characters",
+               "safe": "", "max": 400},
+}
+
+
+def shape_error(key: str, value: str, rule: dict) -> str:
+    """The line the panel and the CLI print for a parameter that broke its shape rule.
+
+    One clause per fact: the rule with an example, what is never allowed there, the characters this
+    value actually carried when the rule knows its allowed set, and the length when that is what broke
+    it. A bare 'unexpected shape' tells an operator nothing about what to type instead.
+    """
+    parts = [f"parameter '{key}' must be {rule['rule']}", rule["not"]]
+    safe = shape_class(rule.get("safe") or "")
+    if safe:
+        bad = [c for c in dict.fromkeys(value) if c not in safe]
+        if bad:
+            shown = ", ".join("space" if c == " " else repr(c) for c in bad[:6])
+            if len(bad) > 6:
+                shown += f" and {len(bad) - 6} more"
+            parts.append(f"this value carries: {shown}")
+    if rule.get("max") and len(value) > rule["max"]:
+        parts.append(f"this value is {len(value)} characters long")
+    return " · ".join(parts)
 
 
 def cmd_web(argv: list[str]):
@@ -2361,24 +2466,9 @@ def cmd_web(argv: list[str]):
             tail = ["--plain"]
 
             # Values from the query end up in the argv of a child hermes/herman process, so a value
-            # that looks like a flag could turn "delete matching" into "delete all". Shapes are
-            # checked per parameter, secrets are exempt (they travel through the environment).
-            shapes = {
-                "name": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
-                "new_name": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
-                "id": r"\d{1,12}",
-                "session": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}",
-                "var": r"[A-Za-z_][A-Za-z0-9_]{0,63}",
-                "q": r"[^-].{0,199}",
-                "path": r"/?[^\x00-\x1f]{0,399}",
-                "url": r"[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\x00-\x1f]{1,380}",
-                "remote_name": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
-                "helper": r"[A-Za-z0-9][A-Za-z0-9._ /-]{0,63}",
-                "gateway": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
-                "provider": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
-                # an endpoint is either a URL or the word `default` (drop model.base_url)
-                "target": r"(?:default|none)|[A-Za-z][A-Za-z0-9+.\-]{1,15}://[^\x00-\x1f]{1,380}",
-            }
+            # that looks like a flag could turn "delete matching" into "delete all". Shapes live in
+            # SHAPE_RULES (each one carries the sentence shown on a mismatch), secrets are exempt
+            # (they travel through the environment).
             free = ("value", "token", "password")     # secrets never reach argv
             for key, values in q.items():
                 if key in ("t", "action", "confirm") or key.startswith("--") or key in free:
@@ -2387,14 +2477,18 @@ def cmd_web(argv: list[str]):
                     value = "" if raw is None else str(raw)
                     if len(value) > 400 or any(ord(ch) < 32 for ch in value):
                         self._json({"error": f"parameter '{key}' is too long or carries control "
-                                             f"characters"}, 400)
+                                             f"characters: 400 characters at most, and no control "
+                                             f"characters at all"}, 400)
                         return
                     if value.startswith("-"):
-                        self._json({"error": f"parameter '{key}' must not look like a command line "
-                                             f"flag"}, 400)
+                        self._json({"error": f"parameter '{key}' may not start with a dash: the child "
+                                             f"process would read it as a command line flag and could "
+                                             f"change what the command does (a dash inside the value "
+                                             f"is fine)"}, 400)
                         return
-                    if value and key in shapes and not re.fullmatch(shapes[key], value):
-                        self._json({"error": f"parameter '{key}' has an unexpected shape"}, 400)
+                    rule = SHAPE_RULES.get(key)
+                    if value and rule and not re.fullmatch(rule["re"], value):
+                        self._json({"error": shape_error(key, value, rule)}, 400)
                         return
 
             # Reading actions may stream over GET; anything that writes state must be POST, so a

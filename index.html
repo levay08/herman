@@ -701,7 +701,12 @@
               <div class="create-form">
                 <div>
                   <label class="f" for="newname">New project name</label>
-                  <input id="newname" placeholder="e.g. archiveweb" autocomplete="off">
+                  <input id="newname" placeholder="e.g. archiveweb" autocomplete="off" maxlength="64"
+                         spellcheck="false" title="Allowed: letters, digits, dot, dash and underscore, starting with a letter or a digit, 64 characters at most. Not allowed: spaces, slashes, colons, @, quotes or other punctuation, and no leading dash or dot. Uppercase is stored lowercase.">
+                  <p class="note">Allowed: letters, digits, dot, dash and underscore, starting with a
+                    letter or a digit, 64 characters at most. Not allowed: spaces, slashes, colons, @,
+                    quotes or other punctuation, no leading dash or dot. Uppercase is stored
+                    lowercase.</p>
                 </div>
                 <div>
                   <label class="f" for="newmode">Start from</label>
@@ -1221,7 +1226,11 @@
         <div class="create-form modal-form">
           <div>
             <label class="f" for="newname-m">New project name</label>
-            <input id="newname-m" placeholder="e.g. archiveweb" autocomplete="off">
+            <input id="newname-m" placeholder="e.g. archiveweb" autocomplete="off" maxlength="64"
+                   spellcheck="false" title="Allowed: letters, digits, dot, dash and underscore, starting with a letter or a digit, 64 characters at most. Not allowed: spaces, slashes, colons, @, quotes or other punctuation, and no leading dash or dot. Uppercase is stored lowercase.">
+            <p class="hint">Allowed: letters, digits, dot, dash and underscore, starting with a letter
+              or a digit, 64 characters at most. Not allowed: spaces, slashes, colons, @, quotes or
+              other punctuation, no leading dash or dot. Uppercase is stored lowercase.</p>
           </div>
           <div>
             <label class="f" for="newmode-m">Start from</label>
@@ -3605,8 +3614,17 @@ async function saveDesc(name, text){
 }
 async function createProjectFrom(nameId, modeId, descId){
   const field = document.getElementById(nameId);
-  const name = (field && field.value || '').trim().toLowerCase();
-  if (!name){ setStatus('error', 'Enter a project name first.'); return false; }
+  const typed = ((field && field.value) || '').trim();
+  const problem = nameProblem(typed);
+  if (problem){
+    /* The rule is checked here as well as on the server: a typo is answered in the same words without
+       a round trip, and the field keeps what was typed so it can be corrected. */
+    setStatus('error', problem);
+    say('✗ ' + problem);
+    if (field) field.focus();
+    return false;
+  }
+  const name = typed.toLowerCase();      // Hermes profile ids are lowercase
   const mode = document.getElementById(modeId).value;
   const extra = mode === 'clean' ? {'--no-skills': 1} : (mode === 'clone' ? {'--clone': 1} : {'--clone-all': 1});
   const dEl = descId ? document.getElementById(descId) : null;
@@ -3688,10 +3706,20 @@ function removeProject(name){
 }
 
 /* ---------- renaming a project (the profile itself) ---------- */
-function projectNameShape(name){
-  /* The shape the panel and the CLI accept for a profile name, checked here as well so a typo or an
-     impossible name is answered immediately instead of after a round trip. */
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name);
+const NAME_RULE = 'A project name holds only letters, digits, dot, dash and underscore, starts with a '
+  + 'letter or a digit, and is at most 64 characters long. It may not hold spaces, slashes, colons, @, '
+  + 'quotes or any other punctuation, and may not start with a dash or a dot.';
+function nameProblem(name){
+  /* '' when the name can be used, otherwise the sentence the panel shows. It states the same rule the
+     server enforces, in the same words, so a typo is answered before a request leaves the page. Both
+     the create form and the rename flow call this: one rule, one wording. */
+  if (!name) return 'Enter a project name first.';
+  const bad = [...new Set([...name].filter(c => !/[A-Za-z0-9._-]/.test(c)))];
+  const why = [];
+  if (!/^[A-Za-z0-9]/.test(name)) why.push('it starts with ' + JSON.stringify(name[0]));
+  if (bad.length) why.push('it carries ' + bad.map(c => c === ' ' ? 'space' : JSON.stringify(c)).join(', '));
+  if (name.length > 64) why.push('it is ' + name.length + ' characters long');
+  return why.length ? NAME_RULE + ' This one fails because ' + why.join(' and ') + '.' : '';
 }
 async function renameProject(old, next){
   /* One implementation behind every entry point (the pencil on the card, the Rename button in the
@@ -3705,10 +3733,8 @@ async function renameProject(old, next){
     setStatus('error', 'The root profile IS your Hermes home folder: Hermes cannot move it, so it has no rename.');
     return false;
   }
-  if (!projectNameShape(to)){
-    setStatus('error', 'A name starts with a letter or a digit and may hold letters, digits, dot, dash and underscore (max 64).');
-    return false;
-  }
+  const problem = nameProblem(to);
+  if (problem){ setStatus('error', problem); return false; }
   if ((projects || []).some(x => x.name === to)){
     setStatus('error', 'Project "' + to + '" already exists · pick another name.');
     return false;
@@ -3750,6 +3776,8 @@ function renameProjectPrompt(name){
   const live = p ? (p.sessions || []).length : 0;
   const ans = prompt('Rename project "' + name + '"\n\n'
     + (live ? live + ' session(s) are running in it.\n\n' : '')
+    + 'Allowed: letters, digits, dot, dash and underscore, starting with a letter or a digit, 64 '
+    + 'characters at most. Not allowed: spaces, slashes, colons, @, quotes or other punctuation.\n\n'
     + 'Type the new project name:');
   if (ans === null || !ans.trim()){ setStatus('warn', 'Rename cancelled.'); return; }
   renameProject(name, ans.trim());
@@ -3765,7 +3793,9 @@ function nameEdit(p, wrap, span, btn, cancel){
   input.maxLength = 64;
   input.value = p.name;
   input.placeholder = 'new project name';
-  input.title = 'Enter or the tick renames this project to what the field says; Escape or the cross cancels.';
+  input.title = 'Enter or the tick renames this project to what the field says; Escape or the cross '
+    + 'cancels. Allowed: letters, digits, dot, dash and underscore, starting with a letter or a digit, '
+    + '64 characters at most; no spaces, slashes, colons or @.';
   span.replaceWith(input);
   btn.textContent = '✓';
   btn.classList.add('saving');
