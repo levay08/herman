@@ -161,6 +161,8 @@
   .sess-kill > .bi{width:12px;height:12px}
   .msg-mark{width:14px;height:14px;flex:none}
   .state{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  /* the chat rows carry a password field beside their Save/Drop buttons: keep it small but usable */
+  #acc-chat-table input[type=password]{max-width:210px;min-width:150px}
   .state > .bi{width:13px;height:13px}
   td.ok .state{color:var(--ok)}
   td.off .state{color:var(--dim2)}
@@ -1159,17 +1161,9 @@
             <div class="scrollx"><table id="acc-chat-table"></table></div>
             <div class="row">
               <div>
-                <label class="f" for="chat-platform">platform</label>
+                <label class="f" for="chat-platform">platform whose settings you are editing</label>
                 <select id="chat-platform" onchange="chatFormFill()"></select>
               </div>
-              <div>
-                <label class="f" for="chat-token">token (stored in .env, never shown again)</label>
-                <input id="chat-token" type="password" placeholder="paste the bot token" autocomplete="new-password">
-              </div>
-              <button class="primary" onclick="chatSaveToken()" title="herman config &lt;project&gt; chat &lt;platform&gt; --token; the value is POSTed and written with mode 0600.">Save token</button>
-              <button class="ghost" onclick="chatClearToken()" title="herman config &lt;project&gt; chat &lt;platform&gt; --clear-token; asks you to type the variable name first.">Clear token</button>
-            </div>
-            <div class="row">
               <div>
                 <label class="f" for="chat-key">setting</label>
                 <select id="chat-key" onchange="chatFormFill()"></select>
@@ -1178,8 +1172,7 @@
                 <label class="f" for="chat-value">value</label>
                 <input id="chat-value" placeholder="true / false / 123,456" autocomplete="off">
               </div>
-              <button onclick="chatSaveKey()" title="herman config &lt;project&gt; chat &lt;platform&gt; --set key=value">Save setting</button>
-              <button class="primary" onclick="chatToggle()" title="herman config &lt;project&gt; chat &lt;platform&gt; --enable / --disable">Enable / disable</button>
+              <button class="primary" onclick="chatSaveKey()" title="herman config &lt;project&gt; chat &lt;platform&gt; --set key=value">Save chat setting</button>
             </div>
 
             <div class="subhead">Web search &amp; extract backends</div>
@@ -1194,7 +1187,7 @@
                 <label class="f" for="web-value">value</label>
                 <input id="web-value" placeholder="an exa key, a searxng url, 30" autocomplete="off">
               </div>
-              <button onclick="webSaveSetting()" title="herman config &lt;project&gt; web --set key=value; a provider key goes to .env instead.">Save setting</button>
+              <button onclick="webSaveSetting()" title="herman config &lt;project&gt; web --set key=value; a provider key goes to .env instead.">Save backend setting</button>
               <div>
                 <label class="f" for="web-provider">or a backend key</label>
                 <select id="web-provider" onchange="webFormFill()"></select>
@@ -1583,6 +1576,10 @@ function navigate(route){
   document.getElementById('view-title').textContent = TITLES[r][0];
   document.getElementById('view-sub').textContent = TITLES[r][1];
   if (location.hash !== '#/' + r) history.replaceState(null, '', '#/' + r);
+  /* The source notice belongs to the board that opened it. Left open it covered the whole viewport
+     (a full-screen scrim with pointer-events), so every mouse click on the NEXT board landed on the
+     scrim and the panel looked like a set of dead buttons. */
+  if (r !== 'model' && r !== 'insights') closeModal('src-modal');
   maybeSources(r);
   const loader = ROUTE_LOAD[r];
   if (loader) loader();               // every tab pulls its own data
@@ -2491,25 +2488,21 @@ function mcpRemove(name){
   cfgRemove({area: 'mcp', sub: 'rm', subject: name}, name,
             'Remove MCP server "' + name + '" from this project\'s config.yaml?');
 }
-function chatToggle(){
-  const platform = selVal('chat-platform');
-  const cur = chatOne(platform);
-  if (!cur) return;
-  cfgSet({area: 'chat', subject: platform, state: cur.enabled ? 'off' : 'on'});
+function chatToggle(platform, on){
+  const target = platform || selVal('chat-platform');
+  if (!target) return;
+  cfgSet({area: 'chat', subject: target, state: on ? 'on' : 'off'});
 }
-function chatSaveToken(){
-  const platform = selVal('chat-platform');
-  const token = v('chat-token');
+function chatTokenSave(platform, input){
+  const token = input ? input.value : '';
   if (!token){ setStatus('error', 'Paste the token first.'); return; }
   cfgSet({area: 'chat', subject: platform, value: token});
-  const el = document.getElementById('chat-token');
-  if (el) el.value = '';
+  if (input) input.value = '';
 }
-function chatClearToken(){
-  const platform = selVal('chat-platform');
+function chatTokenDrop(platform){
   const cur = chatOne(platform);
   if (!cur) return;
-  cfgRemove({area: 'chat', subject: platform}, cur.secret,
+  cfgRemove({area: 'chat', subject: platform, secret: cur.secret}, cur.secret,
             'Drop ' + cur.secret + ' from this project\'s .env? The platform stays configured but '
             + 'cannot authenticate until a new token is saved.');
 }
@@ -2597,18 +2590,35 @@ function renderIntegrations(d){
       c.what]),
     'command list unavailable');
 
-  table('acc-chat-table', ['Platform', 'State', 'Secret in this project .env', 'Config keys', 'Change'],
+  /* Each row carries its own controls: the token goes in next to the row that names it (POSTed, so
+     it never rides in the URL), and the switch that turns the platform on sits in the row too. A
+     button that only moved a dropdown below the fold read as a dead button, so nothing in a row
+     needs a second step anywhere else. */
+  function chatTokenCell(c){
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.autocomplete = 'new-password';
+    input.placeholder = c.secret_set ? 'stored · paste to replace' : 'paste the bot token';
+    input.title = 'Value for ' + c.secret + '; sent as POST and written to .env with mode 0600.';
+    const wrap = document.createElement('span');
+    wrap.className = 'btnrow';
+    wrap.append(input,
+      btn('Save', 'primary', () => chatTokenSave(c.platform, input),
+          'herman config <project> chat ' + c.platform + ' --token'),
+      btn('Drop', 'ghost danger', () => chatTokenDrop(c.platform),
+          'herman config <project> chat ' + c.platform + ' --clear-token (type the variable name)'));
+    return {node: wrap};
+  }
+  table('acc-chat-table', ['Platform', 'State', 'Bot token in this project .env', 'Config keys', 'Switch'],
     (d.chat || []).map(c => [
       c.label,
       stateCell(c.enabled, c.enabled ? 'enabled' : (c.configured ? 'configured, disabled' : 'not configured')),
-      c.secret + (c.secret_set ? ' · set' : ' · not set'),
+      chatTokenCell(c),
       c.keys.map(k => k.key + '=' + k.value).join('  '),
       btnCell([
-        btn('Configure', 'ghost',
-            () => { const el = document.getElementById('chat-platform');
-                    if (el){ el.value = c.platform; chatFormFill(); }
-                    setStatus('ok', 'Platform "' + c.label + '" is selected in the form below.'); },
-            'Pick this platform in the form below.'),
+        btn(c.enabled ? 'Disable' : 'Enable', c.enabled ? 'ghost' : 'primary',
+            () => chatToggle(c.platform, !c.enabled),
+            'herman config <project> chat ' + c.platform + (c.enabled ? ' --disable' : ' --enable')),
       ]),
     ]),
     'No chat platform is configured for this project.');
@@ -3699,10 +3709,27 @@ function showSources(){
 function maybeSources(route){
   if (route !== 'model' && route !== 'insights') return;
   try { if (localStorage.getItem(SRC_KEY) === '1') return; } catch (e) { /* fall through */ }
-  setTimeout(showSources, 400);
+  /* 400 ms after the board renders: a click that was already on its way to a control on this board
+     must not be swallowed by the notice sliding in under the pointer. */
+  setTimeout(() => { if (currentRoute() === route) showSources(); }, 400);
+}
+function currentRoute(){
+  const on = [...document.querySelectorAll('.view')].find(v => v.classList.contains('on'));
+  return on ? on.id.replace('view-', '') : '';
 }
 function openModal(id){
-  document.getElementById(id).hidden = false;
+  const box = document.getElementById(id);
+  if (!box.dataset.scrimBound){
+    /* The scrim is the modal itself: a click that lands on it (not inside the card) closes the
+       dialog. Without this the only way out of a notice was Escape or its own button. */
+    box.dataset.scrimBound = '1';
+    box.addEventListener('click', e => {
+      if (e.target !== box) return;
+      box.hidden = true;
+      if (id === 'src-modal'){ try { localStorage.setItem(SRC_KEY, '1'); } catch (err) { /* ignore */ } }
+    });
+  }
+  box.hidden = false;
   const first = document.querySelector('#' + id + ' .modal-actions button');
   if (first) first.focus();
 }
@@ -3866,6 +3893,16 @@ async function runPost(action, name, body){
     const res = await fetch(`/api/action?t=${TOKEN}&action=${encodeURIComponent(action)}&name=${encodeURIComponent(name || '')}`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})
     });
+    if (!res.ok){
+      /* An answer that is not the event stream is a refusal (a shape rule, a missing confirmation,
+         a write on a read-only action): it carries JSON, and it has to reach the dock. Swallowing
+         it made a refused button look like a button that does nothing. */
+      const err = await res.json().catch(() => ({error: res.status + ' ' + res.statusText}));
+      clearInterval(timer);
+      say('✗ ' + (err.error || 'request failed'));
+      setStatus('error', err.error || 'request failed');
+      return {ok: false, lines: [err.error || 'request failed']};
+    }
     if (!res.body){
       const err = await res.json().catch(() => ({error: 'request failed'}));
       say('✗ ' + (err.error || 'request failed'));

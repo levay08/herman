@@ -140,6 +140,45 @@ def main() -> int:
         st, _h, _b = call("POST", f"/api/action?t={token}&{query}", port=port, host=host)
         check(f"{label} is refused", st, 400)
 
+    # ---- the configure board: every write is POST-only and shape-checked before argv -----------
+    # Each case below must be REFUSED, so a passing run changes nothing on the machine: that is what
+    # makes this battery safe to re-run after any change to the handler or the panel JS.
+    st, _h, _b = call("GET", f"/api/action?t={token}&action=config-set&name=default&area=chat"
+                             f"&subject=telegram&state=on", port=port, host=host)
+    check("a config write over GET is refused", st, 405)
+    st, _h, _b = call("GET", f"/api/action?t={token}&action=config-remove&name=default&area=mcp"
+                             f"&subject=list&confirm=list", port=port, host=host)
+    check("a config removal over GET is refused", st, 405)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-set&area=chat&subject=telegram",
+                      port=port, host=host)
+    check("a config write without a project is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-set&name=default&area=shell"
+                              f"&subject=telegram&state=on", port=port, host=host)
+    check("a config write to an unknown area is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-set&name=default&area=chat"
+                              f"&subject=telegram%3Brm%20-rf%20%2F&state=on", port=port, host=host)
+    check("a subject with a shell metacharacter is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-set&name=default&area=chat"
+                              f"&subject=-x&state=on", port=port, host=host)
+    check("a subject that looks like a flag is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-set&name=default&area=chat"
+                              f"&subject=telegram&set=..%2F..%2Fetc%2Fpasswd", port=port, host=host)
+    check("a setting that is not key=value is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-set&name=default&area=chat"
+                              f"&subject=telegram&set=---=1", port=port, host=host)
+    check("a setting whose key looks like a flag is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-remove&name=default&area=mcp"
+                              f"&sub=rm&subject=whatever", port=port, host=host)
+    check("removing an MCP server without the typed name is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=config-remove&name=default&area=chat"
+                              f"&subject=telegram&confirm=wrong-name", port=port, host=host)
+    check("dropping a token with the wrong confirmation is refused", st, 400)
+    st, _h, body = call("POST", f"/api/action?t={token}&action=config-set&name=default&area=mcp"
+                               f"&sub=add&subject=probe-check", port=port, host=host)
+    # The CLI owns that refusal: it streams an error line and exits 1, and no file is touched.
+    check("an MCP add with neither endpoint nor command is refused by the writer",
+          st == 200 and b"exactly one of" in body and b"exit code 0" not in body, True)
+
     # ---- limits and traversal ----------------------------------------------------------------
     big = b'{"padding":"' + b"a" * (1024 * 1024) + b'"}'
     st, _h, _b = call("POST", f"/api/access-grant?t={token}", port=port, host=host,

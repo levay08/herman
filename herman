@@ -774,16 +774,22 @@ def _yaml_coerce(key: str, raw: str):
     return text
 
 
-def _block_span(lines: list[str], key: str, indent: int) -> tuple[int, int, int, str]:
-    """Where a block body sits in `lines`: (body_start, body_end, body_indent, state).
+def _block_span(lines: list[str], key: str, indent: int, lo: int = 0,
+                hi: int | None = None) -> tuple[int, int, int, str]:
+    """Where a block body sits: (body_start, body_end, body_indent, state), inside [lo, hi).
+
+    The window matters: a nested key has to be looked for inside its parent's body only. Scanning the
+    whole file would find a same-named block that belongs to another parent and write into it, which
+    is how a new `mcp_servers.<name>` once landed inside a later `web:` block.
 
     state is "found" for a header with its body, "absent" when there is no such header, and "inline"
     when the header carries a value on the same line (`web: {backend: exa}`). An inline mapping is not
     editable line-wise, and rewriting it blind would destroy a line herman never wrote.
     """
+    stop = len(lines) if hi is None else hi
     head = " " * indent + f"{key}:"
-    for i, raw in enumerate(lines):
-        stripped = raw.rstrip()
+    for i in range(lo, stop):
+        stripped = lines[i].rstrip()
         if stripped != head and not stripped.startswith(head + " "):
             continue
         rest = stripped[len(head):].strip()
@@ -792,7 +798,7 @@ def _block_span(lines: list[str], key: str, indent: int) -> tuple[int, int, int,
         start = i + 1
         end = start
         body_indent = 0
-        while end < len(lines):
+        while end < stop:
             nxt = lines[end]
             if not nxt.strip():
                 end += 1
@@ -805,6 +811,36 @@ def _block_span(lines: list[str], key: str, indent: int) -> tuple[int, int, int,
             end += 1
         return (start, end, body_indent or indent + 2, "found")
     return (0, 0, indent + 2, "absent")
+
+
+def _insert_at(lines: list[str], lo: int, hi: int) -> int:
+    """Where a new line belongs in a body window: at its end, before the blank lines that close it."""
+    pos = hi
+    while pos > lo and not lines[pos - 1].strip():
+        pos -= 1
+    return pos
+
+
+def _read_block_path(data, keys: tuple[str, ...]):
+    """Walk a parsed block by key path; None when the path is not there."""
+    cur = data
+    for key in keys:
+        if not isinstance(cur, dict) or key not in cur:
+            return None
+        cur = cur[key]
+    return cur
+
+
+def _same_value(parsed, value) -> bool:
+    """Does the value read back from the file equal the one that was written?"""
+    if isinstance(value, bool):
+        return str(parsed).strip().lower() == ("true" if value else "false")
+    if isinstance(value, int):
+        return str(parsed).strip() == str(value)
+    if isinstance(value, (list, tuple)):
+        return (isinstance(parsed, list)
+                and [str(x) for x in parsed] == [str(x) for x in value])
+    return isinstance(parsed, str) and parsed == value
 
 
 def yaml_set(path: Path, keys: tuple[str, ...], value, *, dry: bool = False) -> str:
@@ -820,45 +856,46 @@ def yaml_set(path: Path, keys: tuple[str, ...], value, *, dry: bool = False) -> 
     for key in keys:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", key):
             die(f"config key '{key}': letters, digits, dot, dash and underscore only")
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
-    indent = 0
-    body_start, body_end = 0, len(lines)
+    before = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    lines = before.splitlines() if before else []
+    indent, lo, hi = 0, 0, len(lines)
     for key in keys[:-1]:
-        start, end, body_indent, state = _block_span(lines, key, indent)
+        start, end, body_indent, state = _block_span(lines, key, indent, lo, hi)
         if state == "inline":
             die(f"`{key}:` in {path} is a one-line mapping: edit that line by hand")
         if state == "absent":
-            prev = lines[-1] if lines else ""
-            prev_indent = len(prev) - len(prev.lstrip(" "))
-            # a blank line separates sibling blocks, but not a fresh block from its own header
-            if lines and prev.strip() and not (indent > 0 and prev_indent < indent):
-                lines.append("")
-            lines.append(" " * indent + f"{key}:")
+            pos = _insert_at(lines, lo, hi)
+            fresh = [" " * indent + f"{key}:"]
+            # a blank line separates sibling TOP-LEVEL blocks; a nested block follows its own header
+            if indent == 0 and pos == len(lines) and lines and lines[-1].strip():
+                fresh.insert(0, "")
+            lines[pos:pos] = fresh
             indent += 2
-            body_start = body_end = len(lines)
+            lo = hi = pos + len(fresh)
             continue
-        indent, body_start, body_end = body_indent, start, end
+        indent, lo, hi = body_indent, start, end
     leaf = keys[-1]
     row = " " * indent + f"{leaf}: {_yaml_repr(value)}"
-    for i in range(body_start, body_end):
+    replaced = False
+    for i in range(lo, hi):
         if (len(lines[i]) - len(lines[i].lstrip(" ")) == indent
                 and lines[i].strip().startswith(f"{leaf}:")):
             lines[i] = row
+            replaced = True
             break
-    else:
-        pos = body_end
-        while pos > body_start and not lines[pos - 1].strip():
-            pos -= 1
-        if len(keys) == 1 and pos == 0 and not lines:
-            lines.append(row)
-        else:
-            lines.insert(pos, row)
+    if not replaced:
+        lines.insert(_insert_at(lines, lo, hi), row)
     what = f"{'.'.join(keys)} = {_yaml_repr(value)}"
     if dry:
         print(dim(f"  [dry-run] {path.name}: {what}"))
         return what + "  (dry-run)"
     bak = _backup_file(path)
     path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    # Read it back with the same reader the panel uses. A write that Hermes (or the panel) would read
+    # somewhere else is worse than no write at all: the file goes back and the command fails loudly.
+    if not _same_value(_read_block_path(_yaml_block(path, keys[0]), keys[1:]), value):
+        path.write_text(before, encoding="utf-8")
+        die(f"the write to {path} did not land at {'.'.join(keys)}; the file was put back unchanged")
     return what + (f"  (backup: {bak.name})" if bak else "")
 
 
@@ -870,15 +907,16 @@ def yaml_drop(path: Path, keys: tuple[str, ...], *, dry: bool = False) -> str:
     """
     if not keys:
         die("nothing to drop")
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
-    indent = 0
+    before = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    lines = before.splitlines() if before else []
+    indent, lo, hi = 0, 0, len(lines)
     for key in keys[:-1]:
-        start, end, body_indent, state = _block_span(lines, key, indent)
+        start, end, body_indent, state = _block_span(lines, key, indent, lo, hi)
         if state != "found":
             die(f"`{key}:` is not in {path}")
-        indent, body_start, body_end = body_indent, start, end
+        indent, lo, hi = body_indent, start, end
     key = keys[-1]
-    start, end, _bi, state = _block_span(lines, key, indent)
+    start, end, _bi, state = _block_span(lines, key, indent, lo, hi)
     if state != "found":
         die(f"`{key}:` is not in {path}")
     del lines[start - 1:end]                 # the header line and its body
@@ -906,6 +944,9 @@ def yaml_drop(path: Path, keys: tuple[str, ...], *, dry: bool = False) -> str:
         return what + "  (dry-run)"
     bak = _backup_file(path)
     path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    if _read_block_path(_yaml_block(path, keys[0]), keys[1:]) is not None:
+        path.write_text(before, encoding="utf-8")
+        die(f"`{'.'.join(keys)}` is still in {path} after the removal; the file was put back")
     return what + (f"  (backup: {bak.name})" if bak else "")
 
 
@@ -2556,6 +2597,11 @@ _ORIGIN = "starting with a letter or a digit, at most 64 characters"
 # Every shaped parameter of the web API, with the rule text and the example the panel prints when a
 # value breaks its shape. `safe` is the character set the pattern accepts: it is what lets the message
 # name the characters the value actually carried. `max` is the length the pattern allows.
+# Parameters whose value may legitimately start with a dash: the arguments of an MCP command are the
+# value of `--args`, and `npx -y` / `python -m module` are the normal spellings. Everything else
+# refuses a leading dash, because a value that reaches a child's argv could be read as a flag.
+DASH_OK = {"mcp_args"}
+
 SHAPE_RULES = {
     "name": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", "rule": NAME_RULE, "not": NAME_NOT,
              "safe": "A-Za-z0-9._-", "max": 64},
@@ -2629,10 +2675,10 @@ SHAPE_RULES = {
             "rule": "one key=value pair, e.g. require_mention=true or backend=exa",
             "not": "never allowed: a missing '=', control characters or a value past 300 characters",
             "safe": "", "max": 366},
-    "mcp_url": {"re": r"[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\x00-\x1f]{1,380}",
-                "rule": "an MCP endpoint: a scheme, then ://, then the host "
-                        "(example: https://mcp.example.com/mcp)",
-                "not": "never allowed: a missing scheme, spaces or control characters",
+    "mcp_url": {"re": r"https?://[^\x00-\x1f]{1,380}",
+                "rule": "an MCP endpoint over http or https (example: https://mcp.example.com/mcp)",
+                "not": "never allowed: any other scheme (file, ftp, ws), a missing scheme, spaces or "
+                       "control characters",
                 "safe": "", "max": 400},
     "mcp_command": {"re": r"[A-Za-z0-9./_-][A-Za-z0-9._/-]{0,199}",
                     "rule": "the command that starts a stdio MCP server, e.g. npx or /usr/bin/node",
@@ -3137,16 +3183,22 @@ def cmd_web(argv: list[str]):
             # (they travel through the environment).
             free = ("value", "token", "password")     # secrets never reach argv
             for key, values in q.items():
-                if key in ("t", "action", "confirm") or key.startswith("--") or key in free:
+                if key in ("t", "action", "confirm") or key.startswith("--"):
                     continue
                 for raw in values:
                     value = "" if raw is None else str(raw)
+                    # Length and control characters are checked for EVERY parameter, a secret
+                    # included: it skips the shape rules and the dash rule because it travels in the
+                    # request body and the child's environment, but an unbounded value is an
+                    # unbounded line in a file herman writes.
                     if len(value) > 400 or any(ord(ch) < 32 for ch in value):
                         self._json({"error": f"parameter '{key}' is too long or carries control "
                                              f"characters: 400 characters at most, and no control "
                                              f"characters at all"}, 400)
                         return
-                    if value.startswith("-"):
+                    if key in free:
+                        continue
+                    if value.startswith("-") and key not in DASH_OK:
                         self._json({"error": f"parameter '{key}' may not start with a dash: the child "
                                              f"process would read it as a command line flag and could "
                                              f"change what the command does (a dash inside the value "
@@ -3271,9 +3323,13 @@ def cmd_web(argv: list[str]):
                 # command, so the new name is typed back: a mistyped or prefetched request cannot
                 # move a project by accident.
                 "rename": only("new_name"),
-                # Dropping an MCP server or a stored key changes what the engine will load: the name
-                # of what goes is typed back, exactly as the CLI asks for it on a terminal.
-                "config-remove": only("subject") or only("var"),
+                # Dropping an MCP server, a stored key or a bot token changes what the engine
+                # loads: the name of what goes is typed back, exactly as the CLI asks for it on a
+                # terminal. Which name that is depends on the area: the server for MCP, the .env
+                # variable for a backend key, and the platform's variable for a chat token.
+                "config-remove": (only("var") if only("area") == "web"
+                                  else (only("secret") if only("area") == "chat"
+                                        else only("subject"))),
             }
             if action in confirm_targets:
                 want = confirm_targets[action]
@@ -7583,6 +7639,20 @@ def main(argv: list[str]) -> int:
                 continue
             i += 1
         enable = True if has("--enable") else (False if has("--disable") else None)
+
+        def flag_value(flag: str) -> str:
+            """A flag's value that is allowed to start with a dash.
+
+            `val()` treats a leading dash as another flag, which is right almost everywhere and wrong
+            for the arguments of an MCP command: `npx -y` and `python -m module` are the normal
+            spellings, and dropping them silently writes a server that cannot start.
+            """
+            if flag in args:
+                i = args.index(flag)
+                if i + 1 < len(args):
+                    return args[i + 1]
+            return ""
+
         if area == "chat":
             platform = args[2] if len(args) > 2 and not args[2].startswith("-") else ""
             if not platform:
@@ -7605,7 +7675,7 @@ def main(argv: list[str]) -> int:
                 if not server:
                     die(f"usage: {PROG} config {project} mcp {act} <server>")
                 config_mcp(project, act, server, url=val("--url") or "",
-                           command=val("--command") or "", args=val("--args") or "",
+                           command=val("--command") or "", args=flag_value("--args"),
                            enable=enable, assume_yes=assume_yes, dry=dry)
                 return 0
             die(f"usage: {PROG} config {project} mcp add|rm|enable|disable <server>")

@@ -298,8 +298,14 @@ def main(argv: list[str]) -> int:
     print(f"{blocking} blocking finding(s), {warnings} warning(s)")
     if not blocking:
         print("Files are structured to publish: data files are read at runtime, never bundled.")
-        print("Remember NOT to commit: ~/.local/share/herman/models-local.json (your catalog),")
-        print("~/.cache/herman/* (panel token, pid, project descriptions) and anything under ~/.hermes.")
+    if any(p.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp") for p in files):
+        # An image carries no text to grep for, and a panel screenshot is exactly where usage numbers,
+        # profile names and paths show up. The scanner cannot read pixels, so it says so out loud
+        # instead of reporting "clean" over a file it never looked at.
+        print("Images are not scanned: look at every screenshot by eye before a release, and take it")
+        print("from a throwaway HOME (HERMES_HOME unset) so no real project or usage number is in it.")
+    print("Remember NOT to commit: ~/.local/share/herman/models-local.json (your catalog),")
+    print("~/.cache/herman/* (panel token, pid, project descriptions) and anything under ~/.hermes.")
     return 1 if blocking else 0
 
 
