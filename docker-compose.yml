@@ -13,7 +13,7 @@ services:
       context: .
       args:
         HERMES_BRANCH: main          # pin to the branch your host Hermes runs, to avoid drift
-    image: herman:0.1
+    image: herman:0.2
     container_name: herman
     restart: unless-stopped
     ports:

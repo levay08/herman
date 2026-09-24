@@ -42,7 +42,7 @@ RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
 
 # 2. herman: the CLI, the panel page and the two helper scripts, installed with the same script the
 #    README tells people to run, so the image and a local install cannot drift apart.
-COPY --chown=herman:herman herman index.html caduceus.png security_check.py preflight.py install.sh /tmp/herman-src/
+COPY --chown=herman:herman herman index.html icons.svg icons.LICENSE.txt caduceus.png security_check.py preflight.py install.sh /tmp/herman-src/
 COPY --chown=herman:herman completions/herman /tmp/herman-src/completions/herman
 RUN sh /tmp/herman-src/install.sh \
  && rm -rf /tmp/herman-src \

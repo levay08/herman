@@ -51,7 +51,7 @@ def in_container() -> bool:
     if os.environ.get("HERMAN_IN_CONTAINER"):
         return True
     return any(Path(p).exists() for p in ("/.dockerenv", "/run/.containerenv"))
-VERSION = "0.1"
+VERSION = "0.2"
 AUTHOR = ""            # no personal name in a public repo
 REPO = "https://github.com/levay08/herman"   # shown wherever the old byline used to be
 TAGLINE = "hermes-agent · simple task manager"
@@ -528,26 +528,212 @@ def _yaml_scalar(path: Path, *keys: str) -> str | None:
     return None
 
 
+def _yaml_block(path: Path, key: str) -> dict:
+    """Parse one top-level block of config.yaml into nested dicts, without dependencies.
+
+    Handles the shapes herman reads back for the MCP and integration boards:
+    a mapping of scalars (``telegram: {enabled: true}``), a mapping of mappings
+    (``mcp_servers: {github: {command: npx}}``) and inline lists (``args: ["-y", "x"]``).
+    Read-only: it never writes, and anything it cannot parse is simply left out.
+    """
+    if not path.exists():
+        return {}
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return {}
+    out: dict = {}
+    inside = False
+    stack: list[tuple[int, dict, str]] = []          # (indent, container, last key)
+    for raw in lines:
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        line = raw.strip()
+        if indent == 0:
+            m = re.match(r"^([A-Za-z0-9_.-]+):\s*$", line)
+            inside = bool(m and m.group(1) == key)
+            stack = [(-1, out, "")]
+            continue
+        if not inside:
+            continue
+        if line.startswith("- "):
+            if stack:
+                _, container, last = stack[-1]
+                cur = container.get(last)
+                item = line[2:].strip().strip("'\"")
+                if isinstance(cur, list):
+                    cur.append(item)
+                else:
+                    container[last] = [item]
+            continue
+        m = re.match(r"^([A-Za-z0-9_.-]+):\s*(.*)$", line)
+        if not m:
+            continue
+        k, val = m.group(1), m.group(2).strip()
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        container = stack[-1][1] if stack else out
+        if not val:
+            child: dict = {}
+            container[k] = child
+            stack.append((indent, child, ""))
+            continue
+        if val.startswith("[") and val.endswith("]"):
+            container[k] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+        else:
+            container[k] = val.strip("'\"")
+        if stack:
+            stack[-1] = (stack[-1][0], stack[-1][1], k)
+    return out
+
+
+CHAT_PLATFORMS = (
+    # platform, secret this project's .env must hold, config keys shown on the board
+    ("telegram", "TELEGRAM_BOT_TOKEN", ("allowed_chats", "require_mention", "free_response_channels")),
+    ("discord", "DISCORD_BOT_TOKEN", ("require_mention", "auto_thread", "allowed_channels")),
+)
+
+# The search backends shipped with the engine (plugins/web/<name>/). "free" marks the ones that
+# answer without a key: the four ring members plus the keyless variants of brave and ddgs.
+WEB_PROVIDERS = (
+    # name, key env var ("" = none), note
+    ("exa", "EXA_API_KEY", "keyless ring: search + extract, no key"),
+    ("parallel", "PARALLEL_API_KEY", "keyless ring: search + extract, no key"),
+    ("firecrawl", "FIRECRAWL_API_KEY", "keyless ring: search + extract, no key"),
+    ("keenable", "KEENABLE_API_KEY", "keyless ring: search, no key"),
+    ("tavily", "TAVILY_API_KEY", "keyless only through `hermes tools`, not a ring member"),
+    ("brave_free", "BRAVE_SEARCH_API_KEY", "Brave's free endpoint, no key"),
+    ("ddgs", "", "DuckDuckGo, no key, often served a captcha"),
+    ("searxng", "SEARXNG_URL", "your own SearXNG instance (a URL, not a key)"),
+    ("perplexity", "PERPLEXITY_API_KEY", "paid, needs a key"),
+    ("xai", "XAI_API_KEY", "paid, needs a key"),
+)
+
+# `hermes mcp` as the engine really spells it (`hermes mcp --help`). connect=True means the
+# subcommand opens a real connection (or an OAuth browser flow) - herman never runs those itself.
+MCP_COMMANDS = (
+    ("catalog", False, "the MCP servers on offer, with the status of each entry"),
+    ("list", False, "MCP servers already configured in the engine"),
+    ("add", True, "add a server: --url <endpoint> or --command <cmd> --args ..., --preset <name>"),
+    ("test", True, "try to connect to one server and count its tools"),
+    ("configure", False, "choose which MCP tools a session may use"),
+    ("login", True, "OAuth: opens the browser on the server's authorize page"),
+    ("reauth", True, "OAuth again for a server whose token has expired"),
+    ("remove", False, "remove a server from the engine config"),
+    ("serve", True, "run Hermes as an MCP server for other agents"),
+    ("install", True, "install a server from the catalog (writes the engine config)"),
+)
+
+
+def mcp_report(name: str) -> dict:
+    """MCP servers already written into this project's config.yaml - nothing is contacted."""
+    cfg = profile_home(name) / "config.yaml"
+    block = _yaml_block(cfg, "mcp_servers") if cfg.exists() else {}
+    servers = []
+    for srv, fields in block.items():
+        if not isinstance(fields, dict):
+            continue
+        url = fields.get("url") or ""
+        cmd = fields.get("command") or ""
+        args = fields.get("args")
+        target = url or " ".join(str(x) for x in ([cmd] + (args if isinstance(args, list) else ([args] if args else []))) if x)
+        servers.append({
+            "name": srv,
+            "transport": "http" if url else ("stdio" if cmd else "?"),
+            "target": target or "-",
+            "auth": str(fields.get("auth") or "-"),
+            "enabled": str(fields.get("enabled", "true")),
+            "fields": sorted(k for k in fields if k != "args"),
+        })
+    return {
+        "project": name,
+        "config": str(cfg),
+        "config_exists": cfg.exists(),
+        "key": "mcp_servers",
+        "count": len(servers),
+        "servers": servers,
+        "commands": [{"command": c, "connects": con, "what": w} for c, con, w in MCP_COMMANDS],
+    }
+
+
+def integrations_report(name: str) -> dict:
+    """Options for connecting this project outwards: chat platforms and web search backends.
+
+    Read-only by design: every row reports the value found in the project config.yaml / .env and
+    the exact command that would change it. herman never enables, connects or logs in by itself -
+    the operator (or the published app's user) decides.
+    """
+    home = profile_home(name)
+    cfg = home / "config.yaml"
+    env_names: set[str] = set()
+    try:
+        for ln in (home / ".env").read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=", ln)
+            if m:
+                env_names.add(m.group(1))
+    except OSError:
+        pass
+    chat = []
+    for plat, secret, keys in CHAT_PLATFORMS:
+        block = _yaml_block(cfg, plat) if cfg.exists() else {}
+        rows = []
+        for k in keys:
+            v = block.get(k)
+            if isinstance(v, list):
+                v = ", ".join(str(x) for x in v) or "-"
+            rows.append({"key": k, "value": str(v) if v not in (None, "") else "-"})
+        chat.append({
+            "platform": plat,
+            "label": plat.capitalize(),
+            "enabled": str(block.get("enabled", "")).lower() == "true",
+            "configured": bool(block),
+            "secret": secret,
+            "secret_set": secret in env_names,
+            "keys": rows,
+            "enable_hint": f"herman -u {name} gateway setup   (interactive: platform token + allowlist)",
+        })
+    web_keys = ("backend", "search_backend", "extract_backend", "keyless_fallback", "cache_ttl_minutes")
+    webblock = _yaml_block(cfg, "web") if cfg.exists() else {}
+    web = {
+        "keys": [{"key": k, "value": str(webblock.get(k, "")) or "(default)"} for k in web_keys],
+        "providers": [{"name": p, "env": e or "-", "env_set": e in env_names if e else False, "note": n}
+                      for p, e, n in WEB_PROVIDERS],
+        "enable_hint": "hermes tools   (the official picker)   or   hermes config set web.backend <name>",
+    }
+    return {
+        "project": name,
+        "config": str(cfg),
+        "env": str(home / ".env"),
+        "chat": chat,
+        "web": web,
+        "mcp": mcp_report(name),
+        "note": "Every row above is a status and a command. herman does not connect, does not log in "
+                "and writes no config on this page.",
+    }
+
+
 def gateway_state(name: str) -> str:
     """Messaging gateway status, read the way the engine itself decides it (no process spawn).
 
     Hermes writes `<profile>/gateway_state.json` with `gateway_state` (and `desired_state`), a pid
     record (`pid`, `start_time`) and `active_agents`. The engine keys liveness off the PROCESS, not
     off the file's age, because an idle gateway never advances the timestamp: a live pid therefore
-    means up even in a record that has not been touched for hours, and a dead pid means down even in
-    a freshly written one (that is the ungraceful-kill case: taskkill /F, OOM, power loss). Only when
+    means `running` even in a record that has not been touched for hours, and a dead pid means
+    `stopped` even in a freshly written one (that is the ungraceful-kill case: taskkill /F, OOM,
+    power loss). Only when
     the record carries no pid do we fall back to the file's age, with the engine's own 120 s window.
     """
     p = profile_home(name) / "gateway_state.json"
     if not p.exists():
-        return "down"
+        return "stopped"
     try:
         age = time.time() - p.stat().st_mtime
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return "down"
+        return "stopped"
     if not isinstance(data, dict):
-        return "down"
+        return "stopped"
     st = str(data.get("gateway_state") or data.get("state") or data.get("desired_state") or "").lower()
     pid = data.get("pid")
     try:
@@ -556,7 +742,7 @@ def gateway_state(name: str) -> str:
         pid = 0
     if pid > 0:
         if not _pid_alive(pid):
-            return "down"
+            return "stopped"
         started = data.get("start_time") or data.get("process_start_time")
         try:
             started = float(started)
@@ -564,16 +750,16 @@ def gateway_state(name: str) -> str:
             started = 0.0
         actual = _proc_start_time(pid)
         if started and actual and abs(actual - started) > 5:
-            return "down"          # a recycled pid is not this gateway
+            return "stopped"          # a recycled pid is not this gateway
         busy = str(data.get("active_agents") or "").strip()
         if busy.isdigit() and int(busy) > 0 and st in ("running", "busy", "ok", ""):
             return "busy"
-        return "up" if st in ("running", "busy", "ok", "") else (st or "up")
+        return "running" if st in ("running", "busy", "ok", "") else (st or "running")
     if age > 120:
-        return "down"
+        return "stopped"
     if st in ("running", "busy", "ok", ""):
-        return "up"
-    return st or "down"
+        return "running"
+    return st or "stopped"
 
 
 def _pid_alive(pid) -> bool:
@@ -914,7 +1100,7 @@ def _short_path(path: str, limit: int = 26) -> str:
     """Keep a path cell short so a long workdir cannot push the table past the frame width.
 
     `fit()` shortens an over-long line in the MIDDLE, which used to eat a critical column (a
-    workdir like /tmp/a/very/long/name turned "gateway down" into "d…"). Capping the path cell keeps
+    workdir like /tmp/a/very/long/name turned the status column into "d…"). Capping the path cell keeps
     every other column intact and only trims the least important one.
     """
     text = str(path or "").strip()
@@ -926,7 +1112,7 @@ def _short_path(path: str, limit: int = 26) -> str:
 def print_projects_table(rows: list[dict], show_index: bool = True):
     """Project table that adapts to the terminal: the workdir column is dropped when it would not
     fit, because `fit()` shortens an over-long line in the middle and that used to eat a critical
-    column (a long workdir turned "gateway down" into "d…")."""
+    column (a long workdir turned the status column into "d…")."""
     if not rows:
         print("No projects yet. Create the first one: " + bold(f"{PROG} -p myproject"))
         return
@@ -940,7 +1126,7 @@ def print_projects_table(rows: list[dict], show_index: bool = True):
         live = r.get("sessions") or []
         mark = "●" if live else ("◆" if r["active"] else " ")
         gw = r["gateway"]
-        gw_s = green(gw) if gw == "up" else amber(gw)
+        gw_s = green(gw) if gw == "running" else (dim(gw) if gw == "stopped" else amber(gw))
         num = f"{i:>2}" if show_index else "  "
         head = (f"{num} {mark}{r['name']:<{wname-1}}  {r['model'][:22]:<22}  {gw_s:<7}  "
                 f"{r['skills']:>5}  {human_size(r['memory_bytes']):>7}  {human_time(r['last_used']):<13}")
@@ -1369,7 +1555,11 @@ def do_create(name: str, *, clone: bool = False, clone_all: bool = False,
         args.append("--clone-all")
     elif clone:
         args.append("--clone")
-    if no_alias:
+    # PROG is the tool's own command name, hermes/hermes-acp are the engine's: a project shortcut
+    # with one of those names would replace the binary on PATH (the engine writes one wrapper per
+    # project into ~/.local/bin, so the shortcut wins over whatever was installed there).
+    reserved = name in (PROG, "hermes", "hermes-acp")
+    if no_alias or reserved:
         args.append("--no-alias")
     if no_skills:
         args.append("--no-skills")
@@ -1379,6 +1569,9 @@ def do_create(name: str, *, clone: bool = False, clone_all: bool = False,
     if res.returncode != 0:
         sys.exit(res.returncode)
     ok(f"project '{name}' created at {profile_home(name)}")
+    if reserved:
+        print(dim(f"  no shortcut command: '{name}' is already a program on your PATH · "
+                  f"enter this project with {PROG} -u {name}"))
     print(dim(f"  enter:  {PROG} -u {name}"))
     print(dim(f"  set workdir:  {PROG} -C {name} ~/Projects/{name}"))
 
@@ -1691,9 +1884,9 @@ def do_status(as_json: bool = False):
             if live_rows else amber("none")),
         f"engine                         : Hermes Agent {engine_version()}",
         f"web panel                      : "
-        + (green(f"running at {web['url']}") if web["running"] else amber("down")),
+        + (green(f"running at {web['url']}") if web["running"] else amber("stopped")),
         f"hermes dashboard               : "
-        + (green(f"running at {dash['url']}") if dash["running"] else amber("down")),
+        + (green(f"running at {dash['url']}") if dash["running"] else amber("stopped")),
         f"home                           : {ROOT}",
     ], color=green, width=min(term_width(), 96))
 
@@ -1701,16 +1894,54 @@ def do_status(as_json: bool = False):
 # -------------------------------------------------------------- web panel ---
 
 HTML_NAME = "index.html"
+ICONS_NAME = "icons.svg"
 
 
 def page_rev() -> str:
     """Fingerprint of the served panel page (mtime + size): a browser tab that still runs an
-    older build compares this on every poll and reloads itself."""
+    older build compares this on every poll and reloads itself. The icon sprite counts too, so a
+    new sprite reaches an open tab without a manual hard reload."""
     page = _page_path()
     if not page or not page.exists():
         return "0"
     st = page.stat()
-    return f"{int(st.st_mtime)}-{st.st_size}"
+    icons = icons_path()
+    tail = f"-{int(icons.stat().st_mtime)}-{icons.stat().st_size}" if icons else ""
+    return f"{int(st.st_mtime)}-{st.st_size}{tail}"
+
+
+def icons_path() -> Path | None:
+    """The vendored Bootstrap Icons sprite, kept beside the served page."""
+    page = html_path()
+    if not page:
+        return None
+    for cand in (page.parent / ICONS_NAME, HERMAN_SHARE / ICONS_NAME):
+        if cand.exists():
+            return cand
+    return None
+
+
+def icons_sprite() -> str:
+    p = icons_path()
+    if not p:
+        return ""
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def icon_svg(name: str) -> str:
+    return f'<svg class="bi" aria-hidden="true"><use href="#i-{name}"></use></svg>'
+
+
+def icon_refs(text: str) -> str:
+    """Resolve {{ICON:name}} in the page markup into a reference to the injected sprite.
+
+    Inline use means the icons need no icon font, no extra request and no policy change: the page
+    stays one document and renders the same glyph on every machine.
+    """
+    return re.sub(r"\{\{ICON:([a-z0-9-]+)\}\}", lambda m: icon_svg(m.group(1)), text)
 
 
 def _page_path():
@@ -2031,7 +2262,7 @@ def cmd_web(argv: list[str]):
     if "--status" in argv:
         panels = list_panels()
         if not panels:
-            print(amber("web panel is down"))
+            print(amber("web panel is stopped"))
             print(dim(f"  start it: {PROG} web"))
             return
         for p in panels:
@@ -2210,8 +2441,9 @@ def cmd_web(argv: list[str]):
                 self.end_headers()
                 return
             if u.path in ("/", "/index.html"):
-                body = page.read_text(encoding="utf-8")                  \
-                .replace("{{TOKEN}}", token).replace("{{REV}}", page_rev())
+                body = icon_refs(page.read_text(encoding="utf-8")                  \
+                .replace("{{TOKEN}}", token).replace("{{REV}}", page_rev())        \
+                .replace("{{ICONS}}", icons_sprite()))
                 data = body.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2346,6 +2578,14 @@ def cmd_web(argv: list[str]):
                     self._json(git_report(nm))
                 else:
                     self._json(access_report(nm))
+                return
+            if u.path in ("/api/mcp", "/api/integrations"):
+                nm = q.get("name", [""])[0] or active_profile() or load_state().get("last") \
+                    or DEFAULT_HERMES
+                if not profile_exists(nm):
+                    self._json({"error": f"project '{nm}' does not exist"}, 400)
+                    return
+                self._json(mcp_report(nm) if u.path == "/api/mcp" else integrations_report(nm))
                 return
             if u.path == "/api/backups":
                 self._json({"backups": backup_list()})
@@ -2693,7 +2933,15 @@ def cmd_web(argv: list[str]):
 
 
 def open_terminal(name: str) -> bool:
-    """Open a project session in a new terminal window (panel button)."""
+    """Open a project session in a new terminal window (panel button).
+
+    The window is started *outside* herman's own cgroup whenever the user manager allows it: the
+    panel normally runs as a systemd unit (herman-web.service) with the default KillMode=control-group,
+    and that kill mode takes down every process in the cgroup. `start_new_session=True` only detaches
+    the session and the process group, NOT the cgroup, so a plain Popen child dies together with the
+    panel - restarting the panel closed the session window the user was typing in. A transient
+    `systemd-run --user --scope` gives the window its own scope, which a panel restart leaves alone.
+    """
     cmd = hermes_cmd([], name)
     candidates = [
         ("terminator", ["terminator", "-x"] + cmd),
@@ -2706,12 +2954,37 @@ def open_terminal(name: str) -> bool:
     for binary, argv in candidates:
         if shutil.which(binary):
             try:
-                subprocess.Popen(argv, stdout=subprocess.DEVNULL,
+                subprocess.Popen(_scope_launcher() + argv, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, start_new_session=True)
                 return True
             except OSError:
                 continue
     return False
+
+
+_SCOPE_OK: bool | None = None
+
+
+def _scope_launcher() -> list[str]:
+    """Argv prefix that puts a child in its own systemd scope, or [] when that is not possible.
+
+    Probed once per process: `systemd-run --user --scope` needs a user manager and XDG_RUNTIME_DIR,
+    and a container or a bare session has neither. An empty list keeps the old behaviour instead of
+    failing to open the window at all.
+    """
+    global _SCOPE_OK
+    if _SCOPE_OK is None:
+        _SCOPE_OK = False
+        if shutil.which("systemd-run") and os.environ.get("XDG_RUNTIME_DIR"):
+            try:
+                probe = subprocess.run(["systemd-run", "--user", "--scope", "--collect", "--quiet",
+                                        "/bin/true"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                       timeout=5)
+                _SCOPE_OK = probe.returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                _SCOPE_OK = False
+    return ["systemd-run", "--user", "--scope", "--collect", "--quiet"] if _SCOPE_OK else []
 
 
 # ------------------------------------------------ model · git · access ---
@@ -6261,11 +6534,19 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
 
     # shortcut commands herman relies on (one wrapper per project in ~/.local/bin)
     bin_dir = Path.home() / ".local" / "bin"
-    missing_short, retargeted, stale_short = [], [], []
+    missing_short, retargeted, stale_short, self_named = [], [], [], []
     if bin_dir.is_dir():
         for nm in projects:
             if nm == DEFAULT_HERMES:
                 continue          # the root profile is reached through herman itself
+            if nm == PROG:
+                # A project may carry the tool's own name ("herman"). It must never get a shortcut
+                # wrapper: ~/.local/bin/herman is the CLI itself, and writing `hermes -p herman`
+                # over it turns every `herman` call into a project session - the tool stops working
+                # and only `herman sync --fix` (or ./install.sh) puts the binary back. The panel
+                # and every herman subcommand reach that project by name like any other.
+                self_named.append(nm)
+                continue
             sc = bin_dir / nm
             if not sc.exists():
                 missing_short.append(nm)
@@ -6279,7 +6560,7 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
                 if m and not Path(m.group(1)).exists():
                     retargeted.append(nm)
         for f in bin_dir.iterdir():
-            if not f.is_file() or f.name in projects or f.name in ("herman", "hermes", "hermes-acp"):
+            if not f.is_file() or f.name in projects or f.name in (PROG, "hermes", "hermes-acp"):
                 continue
             try:
                 body = f.read_text(encoding="utf-8", errors="replace")
@@ -6332,12 +6613,55 @@ def sync_report(*, fix: bool = False, dry: bool = False) -> dict:
     if in_container():
         res["unchanged"].append("running from a container image (shortcut wrappers belong to the host)")
     if not (missing_short or retargeted or stale_short):
-        res["unchanged"].append(f"shortcut commands ({len([p for p in projects if p != DEFAULT_HERMES])})")
+        res["unchanged"].append(f"shortcut commands "
+                                f"({len([p for p in projects if p not in (DEFAULT_HERMES, PROG)])})")
+    for nm in self_named:
+        res["unchanged"].append(f"project '{nm}' carries the tool's own name: no shortcut wrapper "
+                                f"(~/.local/bin/{PROG} must stay the CLI itself)")
+
+    # the tool's own name on PATH must be the herman binary, never a project shortcut
+    cli = bin_dir / PROG
+    cli_ok = True
+    if not cli.exists():
+        cli_ok = False
+        res["warnings"].append(f"'{PROG}' is not in ~/.local/bin (run ./install.sh from the checkout)")
+    else:
+        try:
+            body = cli.read_text(encoding="utf-8", errors="replace")
+            shadowed = cli.stat().st_size < 400 and "hermes -p " in body
+        except OSError:
+            shadowed = False
+        if shadowed:
+            cli_ok = False
+            if fix and not dry:
+                try:
+                    shutil.copyfile(THIS_FILE, cli)
+                    cli.chmod(0o755)
+                    res["synced"].append(f"'{PROG}' on PATH was a project shortcut; the herman binary is back")
+                except OSError as exc:
+                    res["warnings"].append(f"could not restore the '{PROG}' binary: {exc}")
+            else:
+                res["warnings"].append(f"'{PROG}' on PATH is a project shortcut, not herman itself"
+                                       f" (`{PROG} sync --fix` puts the binary back)")
+    if cli_ok:
+        res["unchanged"].append(f"'{PROG}' itself on PATH")
 
     # panel page and the files herman owns
     page = html_path()
     if page.exists():
         res["unchanged"].append("panel page")
+        # Run from a checkout: the SERVED page is the installed copy, so a checkout that moved on
+        # without ./install.sh would leave the panel behind whatever is committed in the repo.
+        src = THIS_FILE.parent / HTML_NAME
+        try:
+            if src.exists() and src.resolve() != page.resolve():
+                if src.read_bytes() != page.read_bytes():
+                    res["warnings"].append(f"panel page is older than the checkout ({src}) · "
+                                           "run ./install.sh to copy it into place")
+                else:
+                    res["unchanged"].append("panel page matches the checkout")
+        except OSError:
+            pass
     else:
         res["warnings"].append(f"panel page missing: {page}")
     for asset, note in (("caduceus.png", "dashboard pattern"), ("models-local.json", "local model catalog")):

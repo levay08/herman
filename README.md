@@ -130,7 +130,7 @@ docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
 - `herman: command not found`: add `~/.local/bin` to your `PATH`.
 - The panel looks stale after an upgrade: `herman web --stop && herman web` (Python is kept in memory).
 - Port already in use: `herman web --port 9121`.
-- `gateway: down` on a project: no messaging gateway (Telegram, Discord, ...) runs for it. Harmless.
+- `gateway: stopped` on a project: no messaging gateway (Telegram, Discord, ...) runs for it. Harmless.
 - A session is stuck: `herman kill <project>`, or `herman kill <project> <session-id>`.
 
 ## Keeping your data out of the history

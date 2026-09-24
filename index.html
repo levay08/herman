@@ -152,6 +152,19 @@
         mask-size:var(--wm-tile-sm) var(--wm-tile-sm)} }
   @media (max-width:760px){ #view-dashboard > .wm{display:none} }
 
+  /* ---------- icons (Bootstrap Icons, vendored sprite) ---------- */
+  .bi{width:1em;height:1em;fill:currentColor;flex:none;vertical-align:-0.14em}
+  .navlink > .bi{font-size:15px}
+  .subtab > .bi{font-size:14px}
+  .modal-x > .bi{width:15px;height:15px}
+  .sw-i > .bi{width:12px;height:12px}
+  .sess-kill > .bi{width:12px;height:12px}
+  .msg-mark{width:14px;height:14px;flex:none}
+  .state{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .state > .bi{width:13px;height:13px}
+  td.ok .state{color:var(--ok)}
+  td.off .state{color:var(--dim2)}
+
   /* ---------- tabs (inside each board) ---------- */
   .subtabs{display:flex;gap:var(--s1);flex-wrap:wrap;border-bottom:1px solid var(--line);
            margin-bottom:var(--s3);position:sticky;top:var(--head-h);z-index:5;
@@ -356,6 +369,7 @@
             white-space:nowrap;font-variant-numeric:tabular-nums}
   .sess-kill{width:18px;height:18px;min-height:0;padding:0;margin-left:6px;border-radius:5px;
              font-size:13px;font-weight:700;line-height:1;display:inline-grid;place-items:center;
+             vertical-align:middle;
              color:var(--danger);border:1px solid var(--danger);background:none;cursor:pointer}
   .sess-kill:hover{background:var(--danger-soft)}
   .sess-line{display:flex;align-items:center;gap:4px;justify-content:space-between}
@@ -585,6 +599,7 @@
 </script>
 </head>
 <body>
+{{ICONS}}
 <div class="app">
 
   <aside class="side">
@@ -596,22 +611,23 @@
           <button class="switch" id="theme-toggle" type="button" role="switch" aria-checked="true"
                   aria-label="Dark theme" onclick="toggleTheme()"
                   title="Theme: dark · click to switch to light (saved in this browser).">
-            <span class="sw-knob" aria-hidden="true"><span class="sw-i sw-sun">☀</span><span class="sw-i sw-moon">☾</span></span>
+            <span class="sw-knob" aria-hidden="true"><span class="sw-i sw-sun">{{ICON:sun}}</span><span class="sw-i sw-moon">{{ICON:moon-stars}}</span></span>
           </button>
     </div>
 
     <div class="side-label">Overview</div>
     <nav id="nav">
-      <button class="navlink" data-route="dashboard">Dashboard</button>
-      <button class="navlink" data-route="projects">Projects <span class="n" id="nav-count">0</span></button>
+      <button class="navlink" data-route="dashboard"><svg class="bi" aria-hidden="true"><use href="#i-speedometer2"></use></svg>Dashboard</button>
+      <button class="navlink" data-route="projects"><svg class="bi" aria-hidden="true"><use href="#i-folder2-open"></use></svg>Projects <span class="n" id="nav-count">0</span></button>
     </nav>
 
     <div class="side-label">Manage</div>
     <nav>
-      <button class="navlink" data-route="model">Model</button>
-      <button class="navlink" data-route="insights">Insights</button>
-      <button class="navlink" data-route="access">Access</button>
-      <button class="navlink" data-route="maintenance">Maintenance</button>
+      <button class="navlink" data-route="model"><svg class="bi" aria-hidden="true"><use href="#i-cpu"></use></svg>Model</button>
+      <button class="navlink" data-route="insights"><svg class="bi" aria-hidden="true"><use href="#i-graph-up"></use></svg>Insights</button>
+      <button class="navlink" data-route="access"><svg class="bi" aria-hidden="true"><use href="#i-key"></use></svg>Access</button>
+      <button class="navlink" data-route="maintenance"><svg class="bi" aria-hidden="true"><use href="#i-tools"></use></svg>Maintenance</button>
+      <button class="navlink" data-route="mcp"><svg class="bi" aria-hidden="true"><use href="#i-plug"></use></svg>MCP</button>
     </nav>
 
     <div class="side-foot">
@@ -656,7 +672,7 @@
  ███████║█████╗  ██████╔╝██╔████╔██║███████║██╔██╗ ██║
  ██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══██║██║╚██╗██║
  ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║██║  ██║██║ ╚████║
- ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝<span class="ver"> v0.1</span></pre>
+ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝<span class="ver"> v0.2</span></pre>
             </div>
             <div class="logo-tagline">hermes-agent · simple task manager<span id="tagline-repo"></span></div>
           </div>
@@ -965,12 +981,29 @@
         </div>
       </section>
 
+      <section class="view" id="view-mcp">
+        <p class="note" id="mcp-note">Options only. herman reads the focus project's <code>config.yaml</code> and shows what an MCP server would look like once you add it — it never adds one, never connects and never logs in.</p>
+
+        <div class="card pad">
+          <p class="hint">servers written in <code>mcp_servers</code> of this project's config.yaml</p>
+          <div class="scrollx"><table id="mcp-table"></table></div>
+          <p class="hint" id="mcp-hint">Connect from a terminal you control: <code>hermes -p &lt;project&gt; mcp catalog</code> lists what is on offer, <code>hermes mcp add &lt;name&gt; --url &lt;endpoint&gt;</code> adds one. Both change the engine's own config, so herman leaves them to you.</p>
+        </div>
+
+        <div class="card pad">
+          <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">The engine's MCP commands</div>
+          <p class="hint">every subcommand of <code>hermes mcp</code>, with a note on which ones open a connection. herman runs none of them.</p>
+          <div class="scrollx"><table id="mcp-cmd-table"></table></div>
+        </div>
+      </section>
+
       <section class="view" id="view-access">
         <div class="subtabs" id="access-tabs">
           <button class="subtab active" data-sub="keys" onclick="accessTab('keys')">API keys <span class="n" id="acc-count-keys">0</span></button>
           <button class="subtab" data-sub="sshkeys" onclick="accessTab('sshkeys')">SSH keys <span class="n" id="acc-count-sshkeys">0</span></button>
           <button class="subtab" data-sub="git" onclick="accessTab('git')">Git</button>
           <button class="subtab" data-sub="conn" onclick="accessTab('conn')">Connections <span class="n" id="acc-count-conn">0</span></button>
+          <button class="subtab" data-sub="integrations" onclick="accessTab('integrations')">Integrations <span class="n" id="acc-count-integ">0</span></button>
         </div>
         <p class="note" id="access-note">Everything here belongs to the focus project or this machine. Creating or revoking access asks you to type the name first, every edited file is backed up (<code>*.herman-backup-&lt;stamp&gt;</code>) and secrets are never echoed back.</p>
 
@@ -1098,6 +1131,18 @@
             <div class="scrollx"><table id="conn-table"></table></div>
           </div>
         </div>
+
+        <div class="subpane" id="sub-integrations" data-sub="integrations">
+          <div class="card pad">
+            <p class="hint">what this project could connect to, and what it already has. Options, not actions: herman writes nothing here.</p>
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Chat platforms</div>
+            <div class="scrollx"><table id="acc-chat-table"></table></div>
+            <div class="subhead">Web search &amp; extract backends</div>
+            <div class="kv" id="acc-web-kv"></div>
+            <div class="scrollx"><table id="acc-web-table"></table></div>
+            <p class="hint" id="acc-integ-hint">Enabling any of these changes the engine's own config, so herman hands you the command instead: <code>hermes tools</code> for the web backends, <code>herman -u &lt;project&gt; gateway setup</code> for a chat platform. The MCP board carries the same idea for MCP servers.</p>
+          </div>
+        </div>
       </section>
 
       <section class="view" id="view-maintenance">
@@ -1167,7 +1212,7 @@
           <button class="danger" id="other-close" onclick="otherCloseAndContinue()"
                   title="Terminate every process of those projects, then start this session. The killed session cannot be resumed.">Close those sessions and continue</button>
         </div>
-        <button class="modal-x" onclick="closeOther()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+        <button class="modal-x" onclick="closeOther()" aria-label="Close" title="Close this dialog (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
       </div>
     </div>
 
@@ -1184,7 +1229,7 @@
           <button id="proj-rename" title="herman --rename <project> <new> · renames the profile folder, its wrapper command and herman notes; you type the new name to confirm.">Rename</button>
           <button class="danger" id="proj-delete" title="herman -r <project> · removes the profile; you type the project name to confirm.">Delete</button>
         </div>
-        <button class="modal-x" onclick="closeProj()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+        <button class="modal-x" onclick="closeProj()" aria-label="Close" title="Close this dialog (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
       </div>
     </div>
 
@@ -1205,7 +1250,7 @@
           <button class="danger" onclick="deleteThisMessage()" title="herman history <project> --delete-message <id> · deletes this one message; a database backup is written first.">Delete message</button>
           <button class="danger ghost" onclick="deleteThisSession()" title="herman history <project> --delete-session <id> · deletes the whole session this message belongs to.">Delete session</button>
         </div>
-        <button class="modal-x" onclick="closeMsg()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+        <button class="modal-x" onclick="closeMsg()" aria-label="Close" title="Close this dialog (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
       </div>
     </div>
 
@@ -1214,7 +1259,7 @@
         <h3 id="sum-head">Analysis</h3>
         <p class="hint" id="sum-meta">Reading the numbers…</p>
         <div class="sum-body" id="sum-body"></div>
-        <button class="modal-x" onclick="closeSum()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+        <button class="modal-x" onclick="closeSum()" aria-label="Close" title="Close this dialog (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
       </div>
     </div>
 
@@ -1248,7 +1293,7 @@
         <div class="btnrow modal-actions">
           <button class="primary" onclick="createProjectDialog()" title="herman -p <name> · progress shows in the output panel.">Create project</button>
         </div>
-        <button class="modal-x" onclick="closeCreateModal()" aria-label="Close" title="Close this dialog (Escape also closes it).">✕</button>
+        <button class="modal-x" onclick="closeCreateModal()" aria-label="Close" title="Close this dialog (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
       </div>
     </div>
 
@@ -1275,7 +1320,7 @@
         <div class="btnrow modal-actions">
           <button class="primary" onclick="dismissSources()" title="Remember this and stop showing the notice.">Got it</button>
         </div>
-        <button class="modal-x" onclick="dismissSources()" aria-label="Close" title="Close this notice (Escape also closes it).">✕</button>
+        <button class="modal-x" onclick="dismissSources()" aria-label="Close" title="Close this notice (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
       </div>
     </div>
 
@@ -1292,7 +1337,7 @@
         <div class="btnrow">
           <button class="primary" onclick="submitPw()" title="Send the password once to ssh-copy-id (askpass helper); the field is cleared right after.">Install key</button>
         </div>
-        <button class="modal-x" onclick="closePw()" aria-label="Close" title="Cancel and discard the typed password (Escape also closes it).">✕</button>
+        <button class="modal-x" onclick="closePw()" aria-label="Close" title="Cancel and discard the typed password (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
       </div>
     </div>
 
@@ -1335,6 +1380,15 @@ const progress = document.getElementById('progress');
 let src = null, timer = null, started = 0, lastAction = '', projects = [], focusProject = '', dashInfo = {};
 
 const v = id => (document.getElementById(id).value || '').trim();
+/* Icon markup for the vendored sprite (see icons.svg): every glyph in this page is an <svg><use>
+   reference, so nothing renders as a font-dependent emoji and no remote request is made. */
+function icon(name, cls){ return '<svg class="bi' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + name + '"></use></svg>'; }
+function iconNode(name, cls){
+  const span = document.createElement('span');
+  span.className = 'ico';
+  span.innerHTML = icon(name, cls);
+  return span.firstChild;
+}
 function setHint(id, text){ const el = document.getElementById(id); if (el) el.textContent = text; }
 function fmtUp(sec){
   const m = Math.floor((sec || 0) / 60);
@@ -1352,9 +1406,16 @@ function classify(line){
   return 'plain';
 }
 function say(line){
+  /* The panel's own status lines arrive prefixed with a mark. Render them as an icon: a font-dependent
+     glyph would look different on every machine, an inline sprite looks the same everywhere. */
   const el = document.createElement('span');
   el.className = 'ln ' + classify(line);
-  el.textContent = line + '\n';
+  const marked = /^([✓✗])\s+([\s\S]*)$/.exec(line);
+  if (marked){
+    el.innerHTML = icon(marked[1] === '✓' ? 'check-lg' : 'x-lg', 'msg-mark') + ' ' + escHtml(marked[2]) + '\n';
+  } else {
+    el.textContent = line + '\n';
+  }
   out.appendChild(el);
   out.scrollTop = out.scrollHeight;
   const dock = document.getElementById('dock');
@@ -1439,15 +1500,17 @@ const TITLES = {
   model: ['Model', 'Model, skills, tools and SOUL.md of the focus project'],
   insights: ['Insights', 'Token usage, history search, activity, tools and health of the focus project'],
   access: ['Access', 'Keys, hosts, credentials and connections of the focus project'],
-  maintenance: ['Maintenance', 'Health, backups and housekeeping']
+  maintenance: ['Maintenance', 'Health, backups and housekeeping'],
+  mcp: ['MCP', 'Model Context Protocol servers · options only, nothing is connected']
 };
 const ROUTE_LOAD = {
   dashboard: () => refresh(),
   projects: () => refresh(),
   model: () => { loadFocus(); loadUsage(); },
   insights: () => { loadInsights(); loadUsage(); },
-  access: () => loadFocus(),
-  maintenance: () => refreshAll()
+  access: () => { loadFocus(); loadIntegrations(); },
+  maintenance: () => refreshAll(),
+  mcp: () => { loadFocus(); loadIntegrations(); }
 };
 function navigate(route){
   const r = TITLES[route] ? route : 'dashboard';
@@ -1470,6 +1533,7 @@ function onFocusChange(){
   loadUsage();                        // usage + insights are per project too
   loadInsights();
   loadModelTabIfVisible();            // skills, tools and SOUL.md belong to the focus project as well
+  loadIntegrations();                 // the MCP / integration option lists are per project too
   activateProject(document.getElementById('focus').value);
 }
 async function activateProject(name){
@@ -2259,6 +2323,70 @@ function accessView(a){
   accCounts(a);
 }
 
+/* ---------- MCP & integrations: options only, never an action -------------------------------
+   Everything below reads the focus project's config.yaml / .env through /api/integrations and
+   renders it. There is no click that connects, logs in or writes a config: the panel hands over
+   the command instead, so the operator (or the user of the published app) makes that call. */
+async function loadIntegrations(){
+  if (!focusProject){
+    kv('acc-web-kv', [['status', 'waiting for the project list…']]);
+    return;
+  }
+  let d;
+  try {
+    d = await (await fetch(`/api/integrations?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)).json();
+  } catch (e) {
+    setHint('mcp-note', 'could not read the option list: ' + e);
+    return;
+  }
+  if (d.error){ setHint('mcp-note', d.error); return; }
+  renderIntegrations(d);
+}
+function stateCell(on, label){
+  const wrap = document.createElement('span');
+  wrap.className = 'state';
+  wrap.appendChild(iconNode(on ? 'check-circle' : 'dash-circle'));
+  const tx = document.createElement('span');
+  tx.textContent = label;
+  wrap.appendChild(tx);
+  return {node: wrap, cls: on ? 'ok' : 'off'};
+}
+function renderIntegrations(d){
+  setHint('mcp-note', 'Options only · read from ' + d.config + ' — herman never adds a server, '
+    + 'never connects and never logs in.');
+  const m = d.mcp || { servers: [], commands: [], count: 0 };
+  table('mcp-table', ['Server', 'Transport', 'Target', 'Auth', 'Enabled'],
+    (m.servers || []).map(s => [s.name, s.transport, s.target, s.auth, s.enabled]),
+    'Nothing in mcp_servers for project "' + d.project + '" · no MCP server is connected.');
+  table('mcp-cmd-table', ['Command', 'Opens a connection', 'What it does'],
+    (m.commands || []).map(c => [
+      'hermes mcp ' + c.command,
+      stateCell(c.connects, c.connects ? 'yes — you run it' : 'no, read-only'),
+      c.what]),
+    'command list unavailable');
+
+  table('acc-chat-table', ['Platform', 'State', 'Secret in this project .env', 'Config keys', 'Command you would run'],
+    (d.chat || []).map(c => [
+      c.label,
+      stateCell(c.enabled, c.enabled ? 'enabled' : (c.configured ? 'configured, disabled' : 'not configured')),
+      c.secret + (c.secret_set ? ' · set' : ' · not set'),
+      c.keys.map(k => k.key + '=' + k.value).join('  '),
+      c.enable_hint]),
+    'No chat platform is configured for this project.');
+
+  const w = d.web || { keys: [], providers: [] };
+  kv('acc-web-kv', (w.keys || []).map(k => [k.key, k.value]));
+  table('acc-web-table', ['Backend', 'Key / env var', 'In .env', 'Note'],
+    (w.providers || []).map(p => [
+      p.name, p.env, stateCell(p.env_set, p.env_set ? 'set' : 'not set'), p.note]),
+    'backend list unavailable');
+  setHint('acc-integ-hint', 'Backends: ' + w.enable_hint + '. Chat platforms: run it in a terminal you '
+    + 'control — herman only shows the option.');
+  const on = (d.chat || []).filter(c => c.enabled).length;
+  const cnt = document.getElementById('acc-count-integ');
+  if (cnt) cnt.textContent = on;
+}
+
 /* ---------- project cards ---------- */
 /* ---------- usage & insights: read-only analytics from state.db and logs/ ---------- */
 function fmtTok(n){
@@ -3044,13 +3172,13 @@ function card(p){
        Hermes cannot move the installation root. */
     const tbtn = document.createElement('button');
     tbtn.className = 'desc-edit name-edit';
-    tbtn.textContent = '✎';
+    tbtn.innerHTML = icon('pencil');
     tbtn.title = 'Rename this project: the profile folder, its wrapper command and herman notes all '
       + 'follow the new name.';
     tbtn.setAttribute('aria-label', 'Rename the project ' + p.name);
     const tcan = document.createElement('button');
     tcan.className = 'desc-edit name-edit desc-cancel';
-    tcan.textContent = '✕';
+    tcan.innerHTML = icon('x-lg');
     tcan.hidden = true;
     tcan.title = 'Cancel this rename without changing anything (Escape does the same).';
     tcan.setAttribute('aria-label', 'Cancel the rename of ' + p.name);
@@ -3062,7 +3190,9 @@ function card(p){
   }
   head.appendChild(nameWrap);
   if (p.active) head.appendChild(tag('active', 'ok'));
-  head.appendChild(tag('gateway ' + p.gateway, p.gateway === 'up' ? 'ok' : 'warn'));
+  /* Only a gateway that actually runs earns a tag: a project with no messaging platform configured
+     is the normal case, so "stopped" is never printed as a status here. */
+  if (p.gateway === 'running') head.appendChild(tag('gateway running', 'ok'));
   const liveNow = p.sessions || [];
   if (liveNow.length){
     /* Just the marker on the card: stopping a session is a modal action (Details), so a stray
@@ -3084,13 +3214,13 @@ function card(p){
   dv.title = p.description || '';
   const dbtn = document.createElement('button');
   dbtn.className = 'desc-edit';
-  dbtn.textContent = '✎';
+  dbtn.innerHTML = icon('pencil');
   dbtn.title = 'Edit the description of ' + p.name + ' (a short note shown on the card).';
   dbtn.setAttribute('aria-label', 'Edit the description of ' + p.name);
   dbtn.onclick = ev => { ev.stopPropagation(); descEdit(p.name, desc, dv, dbtn, dcan); };
   const dcan = document.createElement('button');
   dcan.className = 'desc-edit desc-cancel';
-  dcan.textContent = '✕';
+  dcan.innerHTML = icon('x-lg');
   dcan.hidden = true;
   dcan.title = 'Cancel this edit without saving (Escape does the same).';
   dcan.setAttribute('aria-label', 'Cancel the description edit of ' + p.name);
@@ -3137,16 +3267,33 @@ function shortHome(path){
   const m = p.match(/^\/(?:home|Users)\/[^/]+/);
   return m ? '~' + p.slice(m[0].length) : p;
 }
+function sessKill(projectName, s){
+  /* Every session carries this button, the only one of a project included: killOneSession asks
+     for the project name first, so a stray click cannot interrupt a turn. */
+  const kill = document.createElement('button');
+  kill.className = 'sess-kill';
+  kill.textContent = '-';
+  kill.title = 'herman kill ' + projectName + ' --session ' + s.id
+    + ' · stop this one session (Ctrl+C style, asks first).';
+  kill.setAttribute('aria-label', 'Stop session ' + s.id);
+  kill.onclick = () => killOneSession(projectName, s.id);
+  return kill;
+}
 function sessionBox(projectName, live, withProject){
   /* One session reads as a single sentence; several become a short labelled list so ten of
-     them stay readable instead of one very long line. */
+     them stay readable instead of one very long line. Every session carries its own stop
+     button, one running session included: otherwise a project with a single session had no
+     way out of the panel at all. */
   const box = document.createElement('div');
   if (!live.length) return box;
   const head = document.createElement('div');
   head.className = 'sess-head';
   const who = withProject ? projectName + ' ' : '';
   if (live.length === 1){
-    head.textContent = 'Session running now: ' + who + live[0].id;
+    const txt = document.createElement('span');
+    txt.textContent = 'Session running now: ' + who + live[0].id;
+    head.append(txt, sessKill(projectName, live[0]));
+    head.title = live[0].id + ' (' + live[0].surface + ', pid ' + live[0].pid + ')';
     box.appendChild(head);
   } else {
     head.textContent = 'Session running now: ' + who + live.length + ' sessions';
@@ -3156,14 +3303,7 @@ function sessionBox(projectName, live, withProject){
       d.className = 'sess-line';
       const txt = document.createElement('span');
       txt.textContent = '• ' + s.id + '  ·  ' + s.surface + '  ·  pid ' + s.pid + '  ·  up ' + fmtUp(s.age_s);
-      const kill = document.createElement('button');
-      kill.className = 'sess-kill';
-      kill.textContent = '-';
-      kill.title = 'herman kill ' + projectName + ' --session ' + s.id
-        + ' · stop this one session (Ctrl+C style, asks first).';
-      kill.setAttribute('aria-label', 'Stop session ' + s.id);
-      kill.onclick = () => killOneSession(projectName, s.id);
-      d.append(txt, kill);
+      d.append(txt, sessKill(projectName, s));
       d.title = s.id + ' (' + s.surface + ', pid ' + s.pid + ')';
       box.appendChild(d);
     });
@@ -3268,7 +3408,9 @@ async function openProj(name){
   }
   const meta = document.getElementById('proj-meta');
   meta.textContent = '';
-  [['status', 'gateway ' + p.gateway], ['model', p.model], ['workdir', p.cwd],
+  /* Same rule as the card: nothing configured is normal, so only a live gateway earns a row. */
+  const gwRow = p.gateway && p.gateway !== 'stopped' ? [['gateway', p.gateway]] : [];
+  [...gwRow, ['model', p.model], ['workdir', p.cwd],
    ['skills', p.skills + ' installed'], ['memory', fmtSize(p.memory_bytes)],
    ['used', fmtTime(p.last_used)], ['home', shortHome(p.home)]]
     .forEach(([k, val]) => {
@@ -3649,7 +3791,7 @@ async function createProjectDialog(){
   if (await createProjectFrom('newname-m', 'newmode-m', 'newdesc-m')) closeCreateModal();
 }
 function descEdit(name, wrap, span, btn, cancel){
-  /* Pencil -> input, with a ✓ that saves and a ✕ that cancels (Enter saves, Escape cancels). Both
+  /* Pencil -> input, with a check that saves and a cross that cancels (Enter saves, Escape cancels). Both
      buttons only show while the pointer is over the card, so the description reads as plain text the
      rest of the time. `finish()` puts every handler back, otherwise the next pencil click would call
      the previous, already-finished closure and the card would need a page reload to edit again. */
@@ -3660,9 +3802,9 @@ function descEdit(name, wrap, span, btn, cancel){
   input.maxLength = 90;
   input.value = span.classList.contains('empty') ? '' : span.textContent;
   input.placeholder = 'short note (max 90 characters)';
-  input.title = 'Enter or the ✓ saves this description; Escape or the ✕ cancels.';
+  input.title = 'Enter saves this description; Escape cancels.';
   span.replaceWith(input);
-  btn.textContent = '✓';
+  btn.innerHTML = icon('check-lg');
   btn.classList.add('saving');
   btn.title = 'Save this description (Enter does the same).';
   if (cancel){
@@ -3685,7 +3827,7 @@ function descEdit(name, wrap, span, btn, cancel){
       if (p) p.description = stored || '';
     }
     input.replaceWith(span);
-    btn.textContent = '✎';
+    btn.innerHTML = icon('pencil');
     btn.classList.remove('saving');
     btn.title = 'Edit the description of ' + name + ' (a short note shown on the card).';
     btn.onclick = ev => { ev.stopPropagation(); descEdit(name, wrap, span, btn, cancel); };
@@ -3797,7 +3939,7 @@ function nameEdit(p, wrap, span, btn, cancel){
     + 'cancels. Allowed: letters, digits, dot, dash and underscore, starting with a letter or a digit, '
     + '64 characters at most; no spaces, slashes, colons or @.';
   span.replaceWith(input);
-  btn.textContent = '✓';
+  btn.innerHTML = icon('check-lg');
   btn.classList.add('saving');
   btn.title = 'Rename this project to what the field says (Enter does the same).';
   if (cancel){
@@ -3815,7 +3957,7 @@ function nameEdit(p, wrap, span, btn, cancel){
       if (!renamed){ done = false; input.focus(); return; }   // stay in edit mode, nothing lost
     }
     input.replaceWith(span);
-    btn.textContent = '✎';
+    btn.innerHTML = icon('pencil');
     btn.classList.remove('saving');
     btn.title = 'Rename this project: the profile folder, its wrapper command and herman notes all '
       + 'follow the new name.';

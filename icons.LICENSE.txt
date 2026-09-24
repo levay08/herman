@@ -1,0 +1,6 @@
+Bootstrap Icons 1.13.1
+Copyright (c) 2019-2024 The Bootstrap Authors
+Licensed under the MIT License (https://github.com/twbs/icons/blob/main/LICENSE.md)
+
+The files in icons.svg are the unmodified glyph geometry of the icons named above, repacked as
+<symbol> elements for inline use. No other change was made.
