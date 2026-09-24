@@ -140,6 +140,40 @@ def operator_strings() -> list[str]:
     return out
 
 
+# Names that are part of the product, not of the operator's machine: the root profile, the tool
+# itself and the two engine helpers. Everything else under <root>/profiles is somebody's project.
+RESERVED_NAMES = {"default", "herman", "hermes", "hermes-acp"}
+NAME_BOUND = r"(?<![A-Za-z0-9_-]){}(?![A-Za-z0-9_-])"
+
+
+def profile_root() -> Path:
+    """The Hermes root that holds `profiles/`, seen the way herman sees it (HERMES_HOME aware)."""
+    env = os.environ.get("HERMES_HOME", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        if p.parent.name == "profiles":
+            return p.parent.parent
+        return p
+    return Path.home() / ".hermes"
+
+
+def operator_names() -> list[str]:
+    """The operator's project names.
+
+    A published file that names them hands out the shape of this machine (and every screenshot or log
+    line that quotes one). Names are matched on word boundaries, so a three-letter project does not
+    fire on the inside of an unrelated word. The reserved names above are the product's own words and
+    stay allowed.
+    """
+    out: list[str] = []
+    profiles = profile_root() / "profiles"
+    if profiles.is_dir():
+        for p in sorted(profiles.iterdir()):
+            if p.is_dir() and not p.name.startswith(".") and p.name not in RESERVED_NAMES:
+                out.append(p.name)
+    return out
+
+
 def install_generated(path: Path, text: str) -> bool:
     """A per-project shortcut command is not publishable content: the Hermes profile alias writes it
     on this machine and it must name this machine's engine path, so its home directory is by design.
@@ -160,6 +194,10 @@ def scan(path: Path) -> list[tuple[str, str, int, str]]:
     if install_generated(path, text):
         return []
     findings: list[tuple[str, str, int, str]] = []
+    for name in operator_names():
+        for match in re.finditer(NAME_BOUND.format(re.escape(name)), text):
+            findings.append(("operator data (a project name)", name,
+                             text[:match.start()].count("\n") + 1, "block"))
     for token in operator_strings():
         for match in re.finditer(re.escape(token), text):
             findings.append(("operator data (your own state)", token,

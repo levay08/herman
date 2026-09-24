@@ -672,7 +672,7 @@
  ███████║█████╗  ██████╔╝██╔████╔██║███████║██╔██╗ ██║
  ██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══██║██║╚██╗██║
  ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║██║  ██║██║ ╚████║
- ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝<span class="ver"> v0.2</span></pre>
+ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝<span class="ver"> v0.3</span></pre>
             </div>
             <div class="logo-tagline">hermes-agent · simple task manager<span id="tagline-repo"></span></div>
           </div>
@@ -982,12 +982,32 @@
       </section>
 
       <section class="view" id="view-mcp">
-        <p class="note" id="mcp-note">Options only. herman reads the focus project's <code>config.yaml</code> and shows what an MCP server would look like once you add it — it never adds one, never connects and never logs in.</p>
+        <p class="note" id="mcp-note">This board writes the focus project's own <code>config.yaml</code>: add an entry, switch one off or remove it. herman never connects to a server and never logs in — that stays in a terminal you control.</p>
 
         <div class="card pad">
           <p class="hint">servers written in <code>mcp_servers</code> of this project's config.yaml</p>
           <div class="scrollx"><table id="mcp-table"></table></div>
-          <p class="hint" id="mcp-hint">Connect from a terminal you control: <code>hermes -p &lt;project&gt; mcp catalog</code> lists what is on offer, <code>hermes mcp add &lt;name&gt; --url &lt;endpoint&gt;</code> adds one. Both change the engine's own config, so herman leaves them to you.</p>
+          <p class="hint" id="mcp-hint">An entry herman writes is a plain <code>mcp_servers.&lt;name&gt;</code> block: the engine loads it the next time a session starts. <code>hermes mcp test</code> and <code>hermes mcp login</code> open real connections, so they stay yours to run.</p>
+          <div class="subhead">Write an entry</div>
+          <div class="row">
+            <div>
+              <label class="f" for="mcp-name">name</label>
+              <input id="mcp-name" placeholder="server-name" autocomplete="off">
+            </div>
+            <div>
+              <label class="f" for="mcp-url">endpoint (http transport)</label>
+              <input id="mcp-url" placeholder="https://mcp.example.com/mcp" autocomplete="off">
+            </div>
+            <div>
+              <label class="f" for="mcp-command">or command (stdio transport)</label>
+              <input id="mcp-command" placeholder="npx" autocomplete="off">
+            </div>
+            <div>
+              <label class="f" for="mcp-args">command arguments</label>
+              <input id="mcp-args" placeholder="-y,server-fetch" autocomplete="off">
+            </div>
+            <button class="primary" onclick="mcpAdd()" title="herman config &lt;project&gt; mcp add &lt;server&gt; — one of endpoint or command, exactly as the CLI asks.">Add server</button>
+          </div>
         </div>
 
         <div class="card pad">
@@ -1134,13 +1154,55 @@
 
         <div class="subpane" id="sub-integrations" data-sub="integrations">
           <div class="card pad">
-            <p class="hint">what this project could connect to, and what it already has. Options, not actions: herman writes nothing here.</p>
+            <p class="hint">what this project could connect to, and what it already has. Every write here goes to this project's own <code>config.yaml</code> or <code>.env</code> (0600, backed up first) through <code>herman config</code>; herman never contacts a provider.</p>
             <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Chat platforms</div>
             <div class="scrollx"><table id="acc-chat-table"></table></div>
+            <div class="row">
+              <div>
+                <label class="f" for="chat-platform">platform</label>
+                <select id="chat-platform" onchange="chatFormFill()"></select>
+              </div>
+              <div>
+                <label class="f" for="chat-token">token (stored in .env, never shown again)</label>
+                <input id="chat-token" type="password" placeholder="paste the bot token" autocomplete="new-password">
+              </div>
+              <button class="primary" onclick="chatSaveToken()" title="herman config &lt;project&gt; chat &lt;platform&gt; --token; the value is POSTed and written with mode 0600.">Save token</button>
+              <button class="ghost" onclick="chatClearToken()" title="herman config &lt;project&gt; chat &lt;platform&gt; --clear-token; asks you to type the variable name first.">Clear token</button>
+            </div>
+            <div class="row">
+              <div>
+                <label class="f" for="chat-key">setting</label>
+                <select id="chat-key" onchange="chatFormFill()"></select>
+              </div>
+              <div>
+                <label class="f" for="chat-value">value</label>
+                <input id="chat-value" placeholder="true / false / 123,456" autocomplete="off">
+              </div>
+              <button onclick="chatSaveKey()" title="herman config &lt;project&gt; chat &lt;platform&gt; --set key=value">Save setting</button>
+              <button class="primary" onclick="chatToggle()" title="herman config &lt;project&gt; chat &lt;platform&gt; --enable / --disable">Enable / disable</button>
+            </div>
+
             <div class="subhead">Web search &amp; extract backends</div>
             <div class="kv" id="acc-web-kv"></div>
             <div class="scrollx"><table id="acc-web-table"></table></div>
-            <p class="hint" id="acc-integ-hint">Enabling any of these changes the engine's own config, so herman hands you the command instead: <code>hermes tools</code> for the web backends, <code>herman -u &lt;project&gt; gateway setup</code> for a chat platform. The MCP board carries the same idea for MCP servers.</p>
+            <div class="row">
+              <div>
+                <label class="f" for="web-key">setting</label>
+                <select id="web-key" onchange="webFormFill()"></select>
+              </div>
+              <div>
+                <label class="f" for="web-value">value</label>
+                <input id="web-value" placeholder="an exa key, a searxng url, 30" autocomplete="off">
+              </div>
+              <button onclick="webSaveSetting()" title="herman config &lt;project&gt; web --set key=value; a provider key goes to .env instead.">Save setting</button>
+              <div>
+                <label class="f" for="web-provider">or a backend key</label>
+                <select id="web-provider" onchange="webFormFill()"></select>
+              </div>
+              <button class="primary" onclick="webSaveKey()" title="herman config &lt;project&gt; web --key VAR; the value is POSTed, written 0600 and never echoed back.">Save key</button>
+              <button class="ghost danger" onclick="webUnsetKey()" title="herman config &lt;project&gt; web --unset-key VAR; asks you to type the variable name first.">Drop key</button>
+            </div>
+            <p class="hint" id="acc-integ-hint"></p>
           </div>
         </div>
       </section>
@@ -2146,7 +2208,7 @@ function updateEndpointNote(){
   }
   setHint('ep-what', 'Applying runs: hermes -p ' + focusProject + ' config set model.base_url ' + url +
     (prov ? '  ·  hermes -p ' + focusProject + ' config set model.provider ' + prov : '') +
-    '  ·  herman never writes config.yaml itself, so Hermes reads exactly these values.');
+    '  ·  the board reads the same keys Hermes reads, and writes them only when you press a button.');
 }
 function endpointSummary(m){
   setHint('ep-head', focusProject + ': the endpoint and the Hermes provider belong to this ' +
@@ -2351,13 +2413,183 @@ function stateCell(on, label){
   wrap.appendChild(tx);
   return {node: wrap, cls: on ? 'ok' : 'off'};
 }
+let integ = null;      // last /api/integrations payload: the write forms read their choices from it
+function btn(label, cls, fn, title){
+  const b = document.createElement('button');
+  b.className = (cls || '') + ' tiny';
+  b.textContent = label;
+  if (title) b.title = title;
+  b.onclick = fn;
+  return b;
+}
+function btnCell(buttons){
+  const wrap = document.createElement('span');
+  wrap.className = 'btnrow';
+  buttons.forEach(b => wrap.appendChild(b));
+  return {node: wrap};
+}
+function fillSelect(id, values, current){
+  const el = document.getElementById(id);
+  if (!el) return null;
+  el.textContent = '';
+  values.forEach(([value, label]) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label || value;
+    if (value === current) o.selected = true;
+    el.appendChild(o);
+  });
+  return el;
+}
+function selVal(id){
+  const el = document.getElementById(id);
+  return el && el.value ? el.value : '';
+}
+function chatList(){ return (integ && integ.chat) || []; }
+function chatOne(platform){ return chatList().find(c => c.platform === platform) || null; }
+function webList(){ return (integ && integ.web) || { keys: [], providers: [] }; }
+
+/* ---------- writing a setting: the panel builds the `herman config` command, the CLI writes ----
+   Every call below goes through /api/action with POST (the panel refuses a write on a GET) and the
+   CLI does the file edit: it owns the key whitelist, the shape checks, the backup and the typed
+   confirmation. A secret (token, backend key) rides in the request body and the child's environment,
+   never in the URL and never in argv. */
+async function cfgSet(params){
+  await runPost('config-set', focusProject, params);
+  await loadIntegrations();
+  await refresh();
+}
+async function cfgRemove(params, phrase, what){
+  const ans = prompt(what + '\n\nType ' + phrase + ' to confirm:');
+  if (ans === null) return;
+  if (ans !== phrase){
+    setStatus('error', 'Confirmation mismatch: nothing was changed.');
+    return;
+  }
+  await runPost('config-remove', focusProject, Object.assign({confirm: phrase}, params));
+  await loadIntegrations();
+  await refresh();
+}
+function mcpAdd(){
+  const name = v('mcp-name').trim();
+  const url = v('mcp-url').trim();
+  const command = v('mcp-command').trim();
+  const args = v('mcp-args').trim();
+  if (!name){ setStatus('error', 'The server needs a name.'); return; }
+  if (url && command){ setStatus('error', 'Give an endpoint or a command, not both.'); return; }
+  if (!url && !command){ setStatus('error', 'Give an endpoint (http) or a command (stdio).'); return; }
+  const params = {area: 'mcp', sub: 'add', subject: name, state: 'on'};
+  if (url) params.mcp_url = url;
+  if (command) params.mcp_command = command;
+  if (args) params.mcp_args = args;
+  cfgSet(params);
+}
+function mcpToggle(name, on){
+  cfgSet({area: 'mcp', sub: on ? 'enable' : 'disable', subject: name});
+}
+function mcpRemove(name){
+  cfgRemove({area: 'mcp', sub: 'rm', subject: name}, name,
+            'Remove MCP server "' + name + '" from this project\'s config.yaml?');
+}
+function chatToggle(){
+  const platform = selVal('chat-platform');
+  const cur = chatOne(platform);
+  if (!cur) return;
+  cfgSet({area: 'chat', subject: platform, state: cur.enabled ? 'off' : 'on'});
+}
+function chatSaveToken(){
+  const platform = selVal('chat-platform');
+  const token = v('chat-token');
+  if (!token){ setStatus('error', 'Paste the token first.'); return; }
+  cfgSet({area: 'chat', subject: platform, value: token});
+  const el = document.getElementById('chat-token');
+  if (el) el.value = '';
+}
+function chatClearToken(){
+  const platform = selVal('chat-platform');
+  const cur = chatOne(platform);
+  if (!cur) return;
+  cfgRemove({area: 'chat', subject: platform}, cur.secret,
+            'Drop ' + cur.secret + ' from this project\'s .env? The platform stays configured but '
+            + 'cannot authenticate until a new token is saved.');
+}
+function chatSaveKey(){
+  const platform = selVal('chat-platform');
+  const key = selVal('chat-key');
+  const value = v('chat-value').trim();
+  const cur = chatOne(platform);
+  if (!cur || !cur.keys.some(k => k.key === key)){
+    setStatus('error', 'Pick one of the settings this platform has.');
+    return;
+  }
+  if (!value){ setStatus('error', 'The setting needs a value.'); return; }
+  cfgSet({area: 'chat', subject: platform, set: key + '=' + value});
+}
+function webSaveSetting(){
+  const key = selVal('web-key');
+  const value = v('web-value').trim();
+  if (!key){ setStatus('error', 'Pick a setting first.'); return; }
+  if (!value){ setStatus('error', 'The setting needs a value.'); return; }
+  cfgSet({area: 'web', set: key + '=' + value});
+}
+function webSaveKey(){
+  const env = selVal('web-provider');
+  const value = v('web-value');
+  if (!env){ setStatus('error', 'Pick a backend key first.'); return; }
+  if (!value){ setStatus('error', 'Paste the key first.'); return; }
+  cfgSet({area: 'web', var: env, value: value});
+  const el = document.getElementById('web-value');
+  if (el) el.value = '';
+}
+function webUnsetKey(){
+  const env = selVal('web-provider');
+  if (!env){ setStatus('error', 'Pick a backend key first.'); return; }
+  cfgRemove({area: 'web', var: env}, env,
+            'Drop ' + env + ' from this project\'s .env?');
+}
+function chatFormFill(){
+  const cur = chatOne(selVal('chat-platform'));
+  if (!cur) return;
+  const keyEl = document.getElementById('chat-key');
+  if (keyEl){
+    const keep = keyEl.value;
+    keyEl.textContent = '';
+    cur.keys.forEach(k => {
+      const o = document.createElement('option');
+      o.value = k.key;
+      o.textContent = k.key;
+      keyEl.appendChild(o);
+    });
+    if (cur.keys.some(k => k.key === keep)) keyEl.value = keep;
+  }
+  const val = document.getElementById('chat-value');
+  const chosen = cur.keys.find(k => k.key === selVal('chat-key'));
+  if (val && chosen) val.placeholder = chosen.value === '-' ? '(unset)' : chosen.value;
+}
+function webFormFill(){
+  const w = webList();
+  const chosen = w.keys.find(k => k.key === selVal('web-key'));
+  const val = document.getElementById('web-value');
+  if (val && chosen) val.placeholder = chosen.value === '(default)' ? '(default)' : chosen.value;
+}
 function renderIntegrations(d){
-  setHint('mcp-note', 'Options only · read from ' + d.config + ' — herman never adds a server, '
-    + 'never connects and never logs in.');
+  integ = d;
+  const cfgPath = d.config || '';
+  setHint('mcp-note', 'Writes go to ' + cfgPath + ' (each after a backup). herman never connects '
+    + 'and never logs in; a connection stays a terminal you control.');
   const m = d.mcp || { servers: [], commands: [], count: 0 };
-  table('mcp-table', ['Server', 'Transport', 'Target', 'Auth', 'Enabled'],
-    (m.servers || []).map(s => [s.name, s.transport, s.target, s.auth, s.enabled]),
-    'Nothing in mcp_servers for project "' + d.project + '" · no MCP server is connected.');
+  table('mcp-table', ['Server', 'Transport', 'Target', 'Auth', 'Enabled', 'Change'],
+    (m.servers || []).map(s => [
+      s.name, s.transport, s.target, s.auth,
+      stateCell(s.enabled === 'true', s.enabled === 'true' ? 'enabled' : 'disabled'),
+      btnCell([
+        btn(s.enabled === 'true' ? 'Disable' : 'Enable', 'ghost', () => mcpToggle(s.name, s.enabled !== 'true'),
+            'herman config <project> mcp ' + (s.enabled === 'true' ? 'disable' : 'enable') + ' ' + s.name),
+        btn('Remove', 'ghost danger', () => mcpRemove(s.name),
+            'herman config <project> mcp rm ' + s.name + ' (type the name to confirm)'),
+      ]),
+    ]),
+    'Nothing in mcp_servers for project "' + d.project + '" · write one below.');
   table('mcp-cmd-table', ['Command', 'Opens a connection', 'What it does'],
     (m.commands || []).map(c => [
       'hermes mcp ' + c.command,
@@ -2365,13 +2597,20 @@ function renderIntegrations(d){
       c.what]),
     'command list unavailable');
 
-  table('acc-chat-table', ['Platform', 'State', 'Secret in this project .env', 'Config keys', 'Command you would run'],
+  table('acc-chat-table', ['Platform', 'State', 'Secret in this project .env', 'Config keys', 'Change'],
     (d.chat || []).map(c => [
       c.label,
       stateCell(c.enabled, c.enabled ? 'enabled' : (c.configured ? 'configured, disabled' : 'not configured')),
       c.secret + (c.secret_set ? ' · set' : ' · not set'),
       c.keys.map(k => k.key + '=' + k.value).join('  '),
-      c.enable_hint]),
+      btnCell([
+        btn('Configure', 'ghost',
+            () => { const el = document.getElementById('chat-platform');
+                    if (el){ el.value = c.platform; chatFormFill(); }
+                    setStatus('ok', 'Platform "' + c.label + '" is selected in the form below.'); },
+            'Pick this platform in the form below.'),
+      ]),
+    ]),
     'No chat platform is configured for this project.');
 
   const w = d.web || { keys: [], providers: [] };
@@ -2380,8 +2619,19 @@ function renderIntegrations(d){
     (w.providers || []).map(p => [
       p.name, p.env, stateCell(p.env_set, p.env_set ? 'set' : 'not set'), p.note]),
     'backend list unavailable');
-  setHint('acc-integ-hint', 'Backends: ' + w.enable_hint + '. Chat platforms: run it in a terminal you '
-    + 'control — herman only shows the option.');
+
+  fillSelect('chat-platform', (d.chat || []).map(c => [c.platform, c.label]),
+             selVal('chat-platform') || (d.chat || [])[0]?.platform || '');
+  chatFormFill();
+  fillSelect('web-key', (w.keys || []).map(k => [k.key, k.key + '  (' + k.value + ')']),
+             selVal('web-key') || (w.keys || [])[0]?.key || '');
+  fillSelect('web-provider', (w.providers || []).filter(p => p.env && p.env !== '-')
+             .map(p => [p.env, p.name + '  ·  ' + p.env]), selVal('web-provider'));
+  webFormFill();
+  setHint('acc-integ-hint', 'A chat platform needs both halves: the token in .env and '
+    + 'enabled: true in config.yaml. A backend key lands in .env; which backend is active is the '
+    + '`web` block above. Anything deeper than these settings stays with `hermes tools`, '
+    + '`hermes mcp` and `herman -u <project> gateway setup` in a terminal.');
   const on = (d.chat || []).filter(c => c.enabled).length;
   const cnt = document.getElementById('acc-count-integ');
   if (cnt) cnt.textContent = on;
@@ -3487,6 +3737,8 @@ const LABELS = {
   rename: 'Renaming project…',
   list: 'Listing projects…', 'model-set': 'Updating model…', git: 'Reading git status…',
   'model-set-endpoint': 'Writing the endpoint into the Hermes config…',
+  'config-set': 'Writing into this project\'s config…',
+  'config-remove': 'Removing the entry…',
   'model-probe': 'Testing the endpoint…',
   'git-init': 'Initialising repository…', 'git-set-user': 'Saving git identity…',
   'git-set-remote': 'Saving remote…', 'git-rm-remote': 'Removing remote…',
@@ -3548,7 +3800,7 @@ const MUTATING_ACTIONS = new Set([
   'cwd', 'git-init', 'git-set-workdir', 'git-set-user', 'git-set-remote', 'git-rm-remote',
   'git-set-helper', 'access-set-env', 'access-unset-env', 'access-new-key', 'access-revoke-key',
   'access-add-agent', 'access-revoke-agent', 'access-gitcred-add', 'access-gitcred-rm',
-  'model-set-endpoint', 'rename',
+  'model-set-endpoint', 'rename', 'config-set', 'config-remove',
 ]);
 async function run(action, name, extra, opts){
   /* State-changing actions are POSTed, read-only ones are fetched with GET; both answer the same

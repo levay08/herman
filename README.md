@@ -65,6 +65,26 @@ herman -x <file> [--as name]           restore a backup
 herman --tidy [--all] | --logs <name>  free disk space / read the agent log
 ```
 
+**Configure (chat platforms, web backends, MCP servers)**
+
+`herman config` writes into one project's own `config.yaml` and `.env`: the keys the boards show are
+the keys it may touch, every file is backed up first (`*.herman-backup-<stamp>`), secrets are written
+with mode 0600 and never typed on the command line (they come from a prompt or from the panel's POST
+body). herman itself never contacts a provider: it edits the files Hermes reads, and the gateway or
+client you start is what connects.
+
+```sh
+herman config [name]                        what is set, and the command that changes it
+herman config <name> chat telegram --enable | --disable
+herman config <name> chat telegram --token  store the bot token in .env (asked for, never in argv)
+herman config <name> chat telegram --set allowed_chats=123,456 --set require_mention=true
+herman config <name> chat telegram --clear-token     (type the variable name to confirm)
+herman config <name> web --set backend=exa --set cache_ttl_minutes=30
+herman config <name> web --key EXA_API_KEY | --unset-key EXA_API_KEY
+herman config <name> mcp add <server> --url <endpoint> | --command <cmd> [--args a,b]
+herman config <name> mcp enable | disable | rm <server>   (rm asks for the server name)
+```
+
 ## Web panel
 
 ![herman web panel](herman_web.png)
@@ -88,11 +108,17 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
   changer
 - **Insights** history search (click a hit to read the full message), activity, tool counters,
   context health, error digest
-- **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections
+- **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections, and the
+  **Integrations** tab: chat platforms (token, `enabled`, the platform's own settings) and web
+  search/extract backends (which backend is active, and one backend key per provider)
+- **MCP** the servers in a project's `mcp_servers` with add, enable/disable and remove, plus every
+  `hermes mcp` subcommand and whether it opens a connection
 - **Maintenance** backups, disk space, about
 
 Notes: the panel listens on loopback only, and everything inside it that changes state asks you to
-type a name first (a delete and a rename ask for the name they are about to touch). The Hermes
+type a name first (a delete, a rename, a removed MCP server and a dropped key ask for the name they
+are about to touch). A write never happens on a page load: every one of them is a POST, and the
+panel builds the same `herman config` command the CLI accepts instead of editing a file itself. The Hermes
 dashboard (chat, config, keys, MCP, webhooks) stays at `hermes dashboard`, port 9119.
 
 ## Docker

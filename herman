@@ -51,7 +51,7 @@ def in_container() -> bool:
     if os.environ.get("HERMAN_IN_CONTAINER"):
         return True
     return any(Path(p).exists() for p in ("/.dockerenv", "/run/.containerenv"))
-VERSION = "0.2"
+VERSION = "0.3"
 AUTHOR = ""            # no personal name in a public repo
 REPO = "https://github.com/levay08/herman"   # shown wherever the old byline used to be
 TAGLINE = "hermes-agent · simple task manager"
@@ -713,6 +713,386 @@ def integrations_report(name: str) -> dict:
     }
 
 
+# ------------------------------------------------ configure: what a board may write ---
+
+# The keys a write may touch, per area. Every board offers exactly these and anything else is refused
+# by name: a generic "set any key anywhere" door would let a caller edit parts of config.yaml that no
+# screen explains. Hermes owns this file, so each edit herman makes is one it can account for.
+CHAT_SET_KEYS = {
+    "telegram": ("enabled", "allowed_chats", "require_mention", "free_response_channels"),
+    "discord": ("enabled", "allowed_channels", "require_mention", "auto_thread"),
+}
+WEB_SET_KEYS = ("backend", "search_backend", "extract_backend", "keyless_fallback", "cache_ttl_minutes")
+BOOL_SET_KEYS = {"enabled", "require_mention", "auto_thread", "keyless_fallback"}
+INT_SET_KEYS = {"cache_ttl_minutes"}
+LIST_SET_KEYS = {"allowed_chats", "allowed_channels", "free_response_channels", "args"}
+MCP_NAME_RE = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+
+
+def _yaml_quote(text: str) -> str:
+    """One string as YAML text: bare when it is plainly a word, double-quoted when it is not.
+
+    Digits are quoted on purpose: `allowed_chats: [123]` would come back as an int and Hermes
+    compares chat ids as text, so a numeric id has to stay a string in the file.
+    """
+    plain = re.fullmatch(r"[A-Za-z0-9._/@+:-]{1,120}", text or "")
+    reserved = {"true", "false", "yes", "no", "on", "off", "null", "none", "~"}
+    if plain and not re.fullmatch(r"\d+", text) and text.lower() not in reserved:
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _yaml_repr(value) -> str:
+    """One value as YAML: a bare bool or number, an inline list, or a quoted string."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_yaml_quote(str(v)) for v in value) + "]"
+    return _yaml_quote(str(value))
+
+
+def _yaml_coerce(key: str, raw: str):
+    """Typed text as the shape this key expects, or a refusal that names the key."""
+    text = (raw or "").strip()
+    if key in BOOL_SET_KEYS:
+        low = text.lower()
+        if low in ("true", "yes", "on", "1"):
+            return True
+        if low in ("false", "no", "off", "0"):
+            return False
+        die(f"{key}: true or false")
+    if key in INT_SET_KEYS:
+        if not re.fullmatch(r"\d{1,6}", text):
+            die(f"{key}: a whole number")
+        return int(text)
+    if key in LIST_SET_KEYS:
+        return [part.strip() for part in text.split(",") if part.strip()]
+    if len(text) > 400 or any(ord(ch) < 32 for ch in text):
+        die(f"{key}: at most 400 characters and no control characters")
+    return text
+
+
+def _block_span(lines: list[str], key: str, indent: int) -> tuple[int, int, int, str]:
+    """Where a block body sits in `lines`: (body_start, body_end, body_indent, state).
+
+    state is "found" for a header with its body, "absent" when there is no such header, and "inline"
+    when the header carries a value on the same line (`web: {backend: exa}`). An inline mapping is not
+    editable line-wise, and rewriting it blind would destroy a line herman never wrote.
+    """
+    head = " " * indent + f"{key}:"
+    for i, raw in enumerate(lines):
+        stripped = raw.rstrip()
+        if stripped != head and not stripped.startswith(head + " "):
+            continue
+        rest = stripped[len(head):].strip()
+        if rest and not rest.startswith("#"):
+            return (-1, -1, indent + 2, "inline")
+        start = i + 1
+        end = start
+        body_indent = 0
+        while end < len(lines):
+            nxt = lines[end]
+            if not nxt.strip():
+                end += 1
+                continue
+            this = len(nxt) - len(nxt.lstrip(" "))
+            if this <= indent:
+                break
+            if not body_indent:
+                body_indent = this
+            end += 1
+        return (start, end, body_indent or indent + 2, "found")
+    return (0, 0, indent + 2, "absent")
+
+
+def yaml_set(path: Path, keys: tuple[str, ...], value, *, dry: bool = False) -> str:
+    """Write `keys[0]: keys[1]: ... = value`, creating the blocks it needs and touching nothing else.
+
+    herman carries no YAML dependency and this file belongs to Hermes, so the edit is line-wise rather
+    than a re-serialisation: comments, key order and every unrelated block survive as they were. A
+    key that already exists is replaced in place (its indentation kept); a new key lands at the end of
+    its block. Returns the line the caller prints.
+    """
+    if not keys:
+        die("nothing to write")
+    for key in keys:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", key):
+            die(f"config key '{key}': letters, digits, dot, dash and underscore only")
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+    indent = 0
+    body_start, body_end = 0, len(lines)
+    for key in keys[:-1]:
+        start, end, body_indent, state = _block_span(lines, key, indent)
+        if state == "inline":
+            die(f"`{key}:` in {path} is a one-line mapping: edit that line by hand")
+        if state == "absent":
+            prev = lines[-1] if lines else ""
+            prev_indent = len(prev) - len(prev.lstrip(" "))
+            # a blank line separates sibling blocks, but not a fresh block from its own header
+            if lines and prev.strip() and not (indent > 0 and prev_indent < indent):
+                lines.append("")
+            lines.append(" " * indent + f"{key}:")
+            indent += 2
+            body_start = body_end = len(lines)
+            continue
+        indent, body_start, body_end = body_indent, start, end
+    leaf = keys[-1]
+    row = " " * indent + f"{leaf}: {_yaml_repr(value)}"
+    for i in range(body_start, body_end):
+        if (len(lines[i]) - len(lines[i].lstrip(" ")) == indent
+                and lines[i].strip().startswith(f"{leaf}:")):
+            lines[i] = row
+            break
+    else:
+        pos = body_end
+        while pos > body_start and not lines[pos - 1].strip():
+            pos -= 1
+        if len(keys) == 1 and pos == 0 and not lines:
+            lines.append(row)
+        else:
+            lines.insert(pos, row)
+    what = f"{'.'.join(keys)} = {_yaml_repr(value)}"
+    if dry:
+        print(dim(f"  [dry-run] {path.name}: {what}"))
+        return what + "  (dry-run)"
+    bak = _backup_file(path)
+    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    return what + (f"  (backup: {bak.name})" if bak else "")
+
+
+def yaml_drop(path: Path, keys: tuple[str, ...], *, dry: bool = False) -> str:
+    """Remove a whole sub-block (`mcp_servers.<name>`) together with its nested lines.
+
+    A parent left empty goes as well while it stays empty: `mcp_servers:` with nothing under it is a
+    key Hermes reads as None, and an empty block in the file is noise whoever wrote it.
+    """
+    if not keys:
+        die("nothing to drop")
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+    indent = 0
+    for key in keys[:-1]:
+        start, end, body_indent, state = _block_span(lines, key, indent)
+        if state != "found":
+            die(f"`{key}:` is not in {path}")
+        indent, body_start, body_end = body_indent, start, end
+    key = keys[-1]
+    start, end, _bi, state = _block_span(lines, key, indent)
+    if state != "found":
+        die(f"`{key}:` is not in {path}")
+    del lines[start - 1:end]                 # the header line and its body
+    path_keys = keys[:-1]
+    while path_keys:
+        indent = 0
+        spans: list[tuple[int, int]] = []
+        for parent in path_keys:
+            s2, e2, bi2, st2 = _block_span(lines, parent, indent)
+            if st2 != "found":
+                spans = []
+                break
+            spans.append((s2 - 1, e2))
+            indent = bi2
+        if not spans:
+            break
+        header_at, body_end = spans[-1]
+        if any(ln.strip() for ln in lines[header_at + 1:body_end]):
+            break
+        del lines[header_at:body_end]
+        path_keys = path_keys[:-1]
+    what = f"{'.'.join(keys)} removed"
+    if dry:
+        print(dim(f"  [dry-run] {path.name}: {what}"))
+        return what + "  (dry-run)"
+    bak = _backup_file(path)
+    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    return what + (f"  (backup: {bak.name})" if bak else "")
+
+
+def _web_env_names() -> set[str]:
+    """The .env variables the shipped search/extract backends read."""
+    return {env for _n, env, _note in WEB_PROVIDERS if env}
+
+
+def secret_input(prompt: str) -> str:
+    """A secret the operator hands over: from HERMAN_SECRET (the panel's POST body) or the terminal.
+
+    Never from the command line: argv shows up in a process list and in a shell history file, and a
+    token that lands there is a token that leaked.
+    """
+    value = os.environ.pop("HERMAN_SECRET", "")
+    if value:
+        return value
+    if sys.stdin.isatty():
+        import getpass
+        return getpass.getpass(prompt + ": ")
+    return sys.stdin.read().strip()
+
+
+def config_chat(project: str, platform: str, *, enable: bool | None = None, token: str = "",
+                clear_token: bool = False, sets: list[tuple[str, str]] | None = None,
+                assume_yes: bool = False, dry: bool = False) -> bool:
+    """Write one chat platform's block, and its token into the project's .env (0600, backed up).
+
+    herman never talks to the platform: it writes what the operator typed into the two files Hermes
+    reads, and the gateway the operator starts is what connects.
+    """
+    ensure_profile(project)
+    if platform not in CHAT_SET_KEYS:
+        die(f"platform: one of {', '.join(CHAT_SET_KEYS)}")
+    secret_var = next((s for name, s, _keys in CHAT_PLATFORMS if name == platform), "")
+    cfg = profile_home(project) / "config.yaml"
+    if clear_token:
+        if not secret_var:
+            die(f"{platform}: no token variable is known for it")
+        if not confirm(f"Drop {secret_var} from {project}'s .env?", phrase=secret_var,
+                       assume_yes=assume_yes):
+            warn("cancelled")
+            return False
+        if dry:
+            print(dim(f"  [dry-run] remove {secret_var} from {project}'s .env"))
+        else:
+            os.environ["HERMAN_ENV_VAR"] = secret_var
+            try:
+                access_revoke("env", project, assume_yes=True)
+            finally:
+                os.environ.pop("HERMAN_ENV_VAR", None)
+    for key, raw in list(sets or []):
+        if key not in CHAT_SET_KEYS[platform]:
+            die(f"{platform}.{key}: not a key this board writes "
+                f"({', '.join(CHAT_SET_KEYS[platform])})")
+        ok(yaml_set(cfg, (platform, key), _yaml_coerce(key, raw), dry=dry))
+    if enable is not None:
+        ok(yaml_set(cfg, (platform, "enabled"), bool(enable), dry=dry))
+    if token:
+        if not secret_var:
+            die(f"{platform}: no token variable is known for it")
+        access_set_env(project, secret_var, token, dry=dry)
+    if not sets and enable is None and not token and not clear_token:
+        die(f"nothing to change for {platform}: pass --enable/--disable, --token, --set k=v "
+            f"or --clear-token")
+    return True
+
+
+def config_web(project: str, *, sets: list[tuple[str, str]] | None = None, key: str = "",
+               key_value: str = "", unset_key: str = "", assume_yes: bool = False,
+               dry: bool = False) -> bool:
+    """Write the project's web search/extract keys (the `web` block) and one backend key into .env."""
+    ensure_profile(project)
+    cfg = profile_home(project) / "config.yaml"
+    for k, raw in list(sets or []):
+        if k not in WEB_SET_KEYS:
+            die(f"web.{k}: not a key this board writes ({', '.join(WEB_SET_KEYS)})")
+        ok(yaml_set(cfg, ("web", k), _yaml_coerce(k, raw), dry=dry))
+    if unset_key:
+        if unset_key not in _web_env_names():
+            die(f"{unset_key}: not a backend key this board knows "
+                f"({', '.join(sorted(_web_env_names()))})")
+        if not confirm(f"Drop {unset_key} from {project}'s .env?", phrase=unset_key,
+                       assume_yes=assume_yes):
+            warn("cancelled")
+            return False
+        if dry:
+            print(dim(f"  [dry-run] remove {unset_key} from {project}'s .env"))
+        else:
+            os.environ["HERMAN_ENV_VAR"] = unset_key
+            try:
+                access_revoke("env", project, assume_yes=True)
+            finally:
+                os.environ.pop("HERMAN_ENV_VAR", None)
+    if key:
+        if key not in _web_env_names():
+            die(f"{key}: not a backend key this board knows "
+                f"({', '.join(sorted(_web_env_names()))})")
+        if not key_value and not dry:
+            die(f"no value for {key}: it travels through HERMAN_SECRET (the panel sends it as POST), "
+                f"never through the command line")
+        access_set_env(project, key, key_value or "REDACTED-IN-DRY-RUN", dry=dry)
+    if not sets and not key and not unset_key:
+        die("nothing to change: pass --set key=value, --key VAR or --unset-key VAR")
+    return True
+
+
+def config_mcp(project: str, action: str, name: str, *, url: str = "", command: str = "",
+               args: str = "", enable: bool | None = None, assume_yes: bool = False,
+               dry: bool = False) -> bool:
+    """Add, enable, disable or remove one MCP server in the project's config.yaml.
+
+    Only the shape of the entry is written here. herman never runs `hermes mcp add/test/login`: those
+    reach the engine's own config (add) or open a real connection (test, login), and both stay in a
+    terminal the operator controls.
+    """
+    ensure_profile(project)
+    if not re.fullmatch(MCP_NAME_RE, name or ""):
+        die("server name: letters, digits, dot, dash and underscore, starting with a letter or digit")
+    cfg = profile_home(project) / "config.yaml"
+    known = {s["name"] for s in mcp_report(project)["servers"]}
+    if action == "add":
+        if name in known:
+            die(f"'{name}' is already in mcp_servers; remove it first "
+                f"({PROG} config {project} mcp rm {name})")
+        if bool(url) == bool(command):
+            die("add needs exactly one of --url <endpoint> or --command <cmd>")
+        ok(yaml_set(cfg, ("mcp_servers", name, "url" if url else "command"),
+                    url or command, dry=dry))
+        if args:
+            if not command:
+                die("--args belongs with --command")
+            ok(yaml_set(cfg, ("mcp_servers", name, "args"), _yaml_coerce("args", args), dry=dry))
+        ok(yaml_set(cfg, ("mcp_servers", name, "enabled"),
+                    True if enable is None else bool(enable), dry=dry))
+        return True
+    if name not in known:
+        die(f"'{name}' is not in mcp_servers for {project}")
+    if action == "rm":
+        if not confirm(f"Remove MCP server '{name}' from {project}'s config.yaml?", phrase=name,
+                       assume_yes=assume_yes):
+            warn("cancelled")
+            return False
+        ok(yaml_drop(cfg, ("mcp_servers", name), dry=dry))
+        return True
+    if action in ("enable", "disable"):
+        ok(yaml_set(cfg, ("mcp_servers", name, "enabled"), action == "enable", dry=dry))
+        return True
+    die(f"unknown mcp action: {action} (add, rm, enable, disable)")
+
+
+def print_config_report(rep: dict):
+    """The read-out behind `herman config [name]`: what is set, and the exact command that changes it."""
+    name = rep["project"]
+    lines = [f"config   : {rep['config']}", f"env      : {rep['env']}"]
+    for chat in rep["chat"]:
+        state = "enabled" if chat["enabled"] else ("configured, disabled" if chat["configured"]
+                                                   else "not configured")
+        keys = ", ".join(f"{k['key']}={k['value']}" for k in chat["keys"])
+        lines.append(f"chat     : {chat['platform']:<8} {state} · {chat['secret']} "
+                     f"{'set' if chat['secret_set'] else 'not set'}")
+        lines.append(f"           {keys}")
+    for k in rep["web"]["keys"]:
+        lines.append(f"web      : {k['key']:<20} {k['value']}")
+    for prov in rep["web"]["providers"]:
+        mark = "set" if prov["env_set"] else ("no key needed" if prov["env"] == "-" else "not set")
+        lines.append(f"backend  : {prov['name']:<12} {prov['env']:<22} {mark}")
+    if rep["mcp"]["servers"]:
+        for srv in rep["mcp"]["servers"]:
+            lines.append(f"mcp      : {srv['name']:<12} {srv['transport']:<6} {srv['target']} "
+                         f"· enabled={srv['enabled']}")
+    else:
+        lines.append("mcp      : (nothing in mcp_servers)")
+    print_frame(f"configure · {name}", lines, color=blue, width=min(term_width(), 104))
+    print()
+    print(dim("  write something:"))
+    print(dim(f"    {PROG} config {name} chat telegram --enable | --disable | --token | "
+              f"--set require_mention=true"))
+    print(dim(f"    {PROG} config {name} web --set backend=exa | --key EXA_API_KEY | "
+              f"--unset-key EXA_API_KEY"))
+    print(dim(f"    {PROG} config {name} mcp add <server> --url <endpoint> | --command <cmd> "
+              f"[--args a,b]"))
+    print(dim(f"    {PROG} config {name} mcp enable|disable|rm <server>"))
+    print(dim("  every write touches only that project's config.yaml / .env, after a backup; "
+              "herman never connects anywhere."))
+
+
 def gateway_state(name: str) -> str:
     """Messaging gateway status, read the way the engine itself decides it (no process spawn).
 
@@ -1356,6 +1736,21 @@ command; the engine stays the Hermes you already have.
   {PROG} access gitcred-add <host> <user> [token]   store a git credential
   {PROG} access gitcred-rm <host>    forget a stored git credential
   (every revoke/creation asks for confirmation; files are backed up first)
+
+{bold("CONFIGURE (write a setting into one project)")}
+  {PROG} config [name]              what is set for that project, and how to change it
+  {PROG} config <name> chat <platform> --enable | --disable
+  {PROG} config <name> chat <platform> --token     store the platform token (.env, mode 0600)
+  {PROG} config <name> chat <platform> --set k=v   e.g. allowed_chats=123,456
+  {PROG} config <name> chat <platform> --clear-token   (type the variable to confirm)
+  {PROG} config <name> web --set k=v               the `web` block (backend, cache_ttl_minutes, ...)
+  {PROG} config <name> web --key EXA_API_KEY       store a backend key (the value is asked for,
+                                 never typed on the command line)
+  {PROG} config <name> web --unset-key EXA_API_KEY     (type the variable to confirm)
+  {PROG} config <name> mcp add <server> --url <endpoint> | --command <cmd> [--args a,b]
+  {PROG} config <name> mcp enable | disable <server>
+  {PROG} config <name> mcp rm <server>             (type the server name to confirm)
+  (config.yaml and .env are edited in place, each after a backup; herman never connects anywhere)
 
 {bold("WEB PANEL (browser control)")}
   {PROG} web [--port {DEFAULT_WEB_PORT}] [--no-open]   start the panel on 127.0.0.1
@@ -2216,6 +2611,37 @@ SHAPE_RULES = {
                        "(example: https://ai.paas.id/v1)",
                "not": "never allowed: a bare host without a scheme, spaces or control characters",
                "safe": "", "max": 400},
+    # the configure board (chat / web / MCP writes)
+    "area": {"re": r"chat|web|mcp",
+             "rule": "one of the areas a board can write: chat, web or mcp",
+             "not": "never allowed: anything else", "safe": "a-z", "max": 8},
+    "subject": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                "rule": "the thing being configured: a platform, a backend or a server name "
+                        "(letters, digits, dot, dash, underscore)",
+                "not": "never allowed: spaces, slashes, quotes or a leading dash",
+                "safe": "A-Za-z0-9._-", "max": 64},
+    "state": {"re": r"on|off", "rule": "on or off", "not": "never allowed: anything else",
+              "safe": "a-z", "max": 3},
+    "sub": {"re": r"add|rm|enable|disable",
+            "rule": "what to do with the entry: add, rm, enable or disable",
+            "not": "never allowed: anything else", "safe": "a-z", "max": 8},
+    "set": {"re": r"[A-Za-z0-9_.-]{1,64}=[^\x00-\x1f]{0,300}",
+            "rule": "one key=value pair, e.g. require_mention=true or backend=exa",
+            "not": "never allowed: a missing '=', control characters or a value past 300 characters",
+            "safe": "", "max": 366},
+    "mcp_url": {"re": r"[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\x00-\x1f]{1,380}",
+                "rule": "an MCP endpoint: a scheme, then ://, then the host "
+                        "(example: https://mcp.example.com/mcp)",
+                "not": "never allowed: a missing scheme, spaces or control characters",
+                "safe": "", "max": 400},
+    "mcp_command": {"re": r"[A-Za-z0-9./_-][A-Za-z0-9._/-]{0,199}",
+                    "rule": "the command that starts a stdio MCP server, e.g. npx or /usr/bin/node",
+                    "not": "never allowed: spaces, quotes or control characters",
+                    "safe": "A-Za-z0-9._/-", "max": 200},
+    "mcp_args": {"re": r"[^\x00-\x1f]{0,300}",
+                 "rule": "the command's arguments, comma separated (example: -y,server-fetch)",
+                 "not": "never allowed: control characters",
+                 "safe": "", "max": 300},
 }
 
 
@@ -2741,7 +3167,7 @@ def cmd_web(argv: list[str]):
                 "git-set-helper", "access-set-env", "access-unset-env", "access-new-key",
                 "access-revoke-key", "access-add-agent", "access-revoke-agent",
                 "access-gitcred-add", "access-gitcred-rm", "model-set-endpoint",
-                "rename",
+                "rename", "config-set", "config-remove",
             }
             if action in mutating and method != "POST":
                 self._json({"error": f"'{action}' changes state: send it with POST"}, 405)
@@ -2794,12 +3220,45 @@ def cmd_web(argv: list[str]):
                                            "--url", only("url")] + tail,
                 "git-rm-remote": lambda: ["git", name, "rm-remote", "--remote", only("remote_name")] + tail,
                 "git-set-helper": lambda: ["git", name, "set-helper", "--helper", only("helper")] + tail,
+                # The configure board writes one setting per call, into the focus project's own
+                # config.yaml / .env. The panel never edits a file itself: it builds the same
+                # `herman config` command a person would type, and the CLI does the writing.
+                "config": lambda: (["config", name] if name else ["config"]) + tail,
+                "config-set": lambda: (["config", name, only("area")]
+                                       + ([only("subject")] if only("area") == "chat"
+                                          and only("subject") else [])
+                                       + ([only("sub")] if only("area") == "mcp"
+                                          and only("sub") else [])
+                                       + ([only("subject")] if only("area") == "mcp"
+                                          and only("subject") else [])
+                                       + (["--enable"] if only("state") == "on"
+                                          else (["--disable"] if only("state") == "off" else []))
+                                       + (["--set", only("set")] if only("set") else [])
+                                       + (["--token"] if only("area") == "chat"
+                                          and ("token" in q or "value" in q) else [])
+                                       + (["--key", only("var")] if only("area") == "web"
+                                          and only("var") else [])
+                                       + (["--url", only("mcp_url")] if only("mcp_url") else [])
+                                       + (["--command", only("mcp_command")] if only("mcp_command") else [])
+                                       + (["--args", only("mcp_args")] if only("mcp_args") else [])
+                                       + tail),
+                "config-remove": lambda: (["config", name, only("area")]
+                                          + ([only("sub")] if only("area") == "mcp"
+                                             and only("sub") else [])
+                                          + ([only("subject")] if only("area") == "mcp"
+                                             and only("subject") else [])
+                                          + ([only("subject")] if only("area") == "chat"
+                                             and only("subject") else [])
+                                          + (["--clear-token"] if only("area") == "chat" else [])
+                                          + (["--unset-key", only("var")] if only("var") else [])
+                                          + ["-y"] + tail),
             }
             # Secrets (API keys, tokens) reach the CLI through HERMAN_SECRET, never argv.
-            secret_actions = ("access-set-env", "access-gitcred-add")
+            secret_actions = ("access-set-env", "access-gitcred-add", "config-set")
             if not name and action in ("git-init", "git-set-workdir", "git-set-user", "git-set-remote",
                                        "git-rm-remote", "git-set-helper", "access-set-env",
-                                       "model-set", "model-set-endpoint", "model-probe"):
+                                       "model-set", "model-set-endpoint", "model-probe",
+                                       "config-set", "config-remove"):
                 self._json({"error": "this action requires a project name"}, 400)
                 return
             confirm_targets = {
@@ -2812,6 +3271,9 @@ def cmd_web(argv: list[str]):
                 # command, so the new name is typed back: a mistyped or prefetched request cannot
                 # move a project by accident.
                 "rename": only("new_name"),
+                # Dropping an MCP server or a stored key changes what the engine will load: the name
+                # of what goes is typed back, exactly as the CLI asks for it on a terminal.
+                "config-remove": only("subject") or only("var"),
             }
             if action in confirm_targets:
                 want = confirm_targets[action]
@@ -6082,7 +6544,7 @@ _herman() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --summary --tidy --logs --audit --unused --status web completion model git access kill stop sync refresh security sec history remove rm delete --stats --delete-message --delete-session --delete-matching --delete-all --session --all --fix --dry-run -y --yes -v --verbose --json -h --help --set --provider --list --refresh --endpoints --endpoint --base-url --probe"
+  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --summary --tidy --logs --audit --unused --status web completion model git access config configure kill stop sync refresh security sec history remove rm delete --stats --delete-message --delete-session --delete-matching --delete-all --session --all --fix --dry-run --enable --disable --token --clear-token --key --unset-key --url --command --args -y --yes -v --verbose --json -h --help --set --provider --list --refresh --endpoints --endpoint --base-url --probe"
   case "${prev}" in
     -u|--use|-i|--info|-d|--doctor|-r|--remove|-C|--cwd|--usage|--logs|--audit|--alias|remove|rm|delete|history|kill|stop|sync|refresh|security|sec)
       COMPREPLY=( $(compgen -W "$(_herman_projects)" -- "${cur}") ); return 0 ;;
@@ -6147,6 +6609,17 @@ _herman() {
     '--provider[hermes provider]:provider:'
     'git[git]'
     'access[access]'
+    'config[write a setting into one project]:project:_herman_projects'
+    'configure[write a setting into one project]:project:_herman_projects'
+    '--enable[switch a chat platform on]'
+    '--disable[switch a chat platform off]'
+    '--token[store the platform token]'
+    '--clear-token[drop the platform token]'
+    '--key[store a backend key]:backend key:'
+    '--unset-key[drop a backend key]:backend key:'
+    '--url[MCP endpoint]:endpoint:'
+    '--command[MCP command]:command:'
+    '--args[MCP command arguments]:arguments:'
     'kill[stop sessions]:project:_herman_projects'
     'stop[stop sessions]:project:_herman_projects'
     'sync[sync with the engine]'
@@ -7079,6 +7552,64 @@ def main(argv: list[str]) -> int:
             return 0
         do_git(nm, None, dry=dry)
         return 0
+
+    if cmd in ("config", "configure", "cfg"):
+        args = rest[1:]
+        sub = args[0] if args and not args[0].startswith("-") else ""
+        area = args[1] if len(args) > 1 and not args[1].startswith("-") else ""
+        if not sub or not area:
+            # `herman config` reads the active project, `herman config <project>` reads that one:
+            # the moment a second word arrives ("chat", "web", "mcp") it is a write, not a read.
+            nm = sub if sub in list_profiles() else (active_profile() or load_state().get("last")
+                                                     or DEFAULT_HERMES)
+            rep = integrations_report(nm)
+            if as_json:
+                print(json.dumps(rep, indent=2, ensure_ascii=False))
+            else:
+                print_config_report(rep)
+            return 0
+        project = sub
+        if not profile_exists(project):
+            die(f"project '{project}' does not exist (`{PROG} -l` lists them)")
+        sets: list[tuple[str, str]] = []
+        i = 0
+        while i < len(args):
+            if args[i] == "--set" and i + 1 < len(args):
+                key, eq, raw = args[i + 1].partition("=")
+                if not key or not eq:
+                    die("--set wants key=value")
+                sets.append((key, raw))
+                i += 2
+                continue
+            i += 1
+        enable = True if has("--enable") else (False if has("--disable") else None)
+        if area == "chat":
+            platform = args[2] if len(args) > 2 and not args[2].startswith("-") else ""
+            if not platform:
+                die(f"usage: {PROG} config {project} chat <platform> "
+                    f"--enable|--disable|--token|--set key=value|--clear-token")
+            token = secret_input(f"token for {platform}") if has("--token") else ""
+            config_chat(project, platform, enable=enable, token=token,
+                        clear_token=has("--clear-token"), sets=sets, assume_yes=assume_yes, dry=dry)
+            return 0
+        if area == "web":
+            key = val("--key") or ""
+            config_web(project, sets=sets, key=key,
+                       key_value=secret_input(f"value for {key}") if key else "",
+                       unset_key=val("--unset-key") or "", assume_yes=assume_yes, dry=dry)
+            return 0
+        if area == "mcp":
+            act = args[2] if len(args) > 2 and not args[2].startswith("-") else ""
+            if act in ("add", "rm", "enable", "disable"):
+                server = args[3] if len(args) > 3 and not args[3].startswith("-") else ""
+                if not server:
+                    die(f"usage: {PROG} config {project} mcp {act} <server>")
+                config_mcp(project, act, server, url=val("--url") or "",
+                           command=val("--command") or "", args=val("--args") or "",
+                           enable=enable, assume_yes=assume_yes, dry=dry)
+                return 0
+            die(f"usage: {PROG} config {project} mcp add|rm|enable|disable <server>")
+        die(f"unknown area '{area}': chat, web or mcp")
 
     if cmd == "access":
         args = rest[1:]
