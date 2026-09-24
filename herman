@@ -708,8 +708,8 @@ def integrations_report(name: str) -> dict:
         "chat": chat,
         "web": web,
         "mcp": mcp_report(name),
-        "note": "Every row above is a status and a command. herman does not connect, does not log in "
-                "and writes no config on this page.",
+        "note": "Every row above is a status. herman writes only when a button is pressed, and only "
+                "into this project's own config.yaml / .env; it never connects and never logs in.",
     }
 
 
