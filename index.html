@@ -751,6 +751,7 @@
           <button class="subtab" data-sub="endpoint" onclick="modelTab('endpoint')">Endpoint</button>
           <button class="subtab" data-sub="change" onclick="modelTab('change')">Change model</button>
           <button class="subtab" data-sub="skills" onclick="modelTab('skills')">Skills</button>
+          <button class="subtab" data-sub="memory" onclick="modelTab('memory')">Memory</button>
           <button class="subtab" data-sub="tools" onclick="modelTab('tools')">Tools</button>
           <button class="subtab" data-sub="soul" onclick="modelTab('soul')">SOUL.md</button>
         </div>
@@ -829,13 +830,57 @@
             <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Installed skills</div>
             <div class="row">
               <div>
-                <label class="f" for="skill-filter">Find a skill</label>
+                <label class="f" for="skill-filter">Filter the installed list</label>
                 <input id="skill-filter" placeholder="filter by name, category or source" autocomplete="off" oninput="renderSkills()">
               </div>
-              <button class="ghost" onclick="loadSkills()" title="Ask Hermes for the installed skill list again.">Reload list</button>
+              <button class="ghost" onclick="loadSkills()" title="Ask Hermes for the installed skill list again (`herman skill &lt;project&gt;`).">Reload list</button>
             </div>
             <p class="hint" id="skills-note">…</p>
             <div class="scrollx"><table id="skills-table"></table></div>
+
+            <div class="subhead">Add a skill from outside</div>
+            <div class="row">
+              <div>
+                <label class="f" for="skill-q">Search the skill sources</label>
+                <input id="skill-q" placeholder="e.g. pdf, kubernetes, sqlite" autocomplete="off">
+              </div>
+              <div>
+                <label class="f" for="skill-source">Source</label>
+                <select id="skill-source" class="picker" aria-label="Skill source"></select>
+              </div>
+              <button class="primary" onclick="findSkills()" title="herman skill &lt;project&gt; find &lt;words&gt; [--source &lt;s&gt;] — the search only runs when you ask for it.">Search</button>
+            </div>
+            <div class="row" style="margin-top:10px">
+              <div>
+                <label class="f" for="skill-id">Or install one directly</label>
+                <input id="skill-id" placeholder="owner/repo/skill, or a link to a SKILL.md" autocomplete="off">
+              </div>
+              <button class="primary" onclick="installSkill()" title="herman skill &lt;project&gt; add &lt;id|url&gt; — the engine installs it into this project and scans it first.">Install</button>
+            </div>
+            <p class="hint" id="skill-find-note">Searching and installing use the engine's own sources; herman keeps no index of its own, and a skill the engine's scan blocks is not installed behind your back.</p>
+            <div class="scrollx"><table id="skill-find-table"></table></div>
+            <div class="btnrow" style="margin-top:10px">
+              <button class="ghost" onclick="updateSkills()" title="hermes skills update — brings installed hub skills up to date, skipping ones you edited locally.">Update installed</button>
+              <button class="ghost" onclick="showTaps()" title="hermes skills tap list — extra GitHub repos that act as skill sources.">Sources (taps)</button>
+              <span class="hint" id="skill-taps-note"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="subpane" data-sub="memory">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Built-in memory</div>
+            <p class="hint" id="memory-note">…</p>
+            <div class="scrollx"><table id="memory-table"></table></div>
+
+            <div class="subhead">External provider (the engine's own list)</div>
+            <p class="hint" id="memory-provider-note">A provider is a service or a local server that stores what the agent remembers, instead of the two files above. Only one can be active, and the engine's setup wizard asks for the key or signs you in; herman never sees that value.</p>
+            <div class="scrollx"><table id="memory-provider-table"></table></div>
+            <div class="btnrow" style="margin-top:10px">
+              <button class="ghost" onclick="loadMemory()" title="herman mem &lt;project&gt; — read the engine's memory status again.">Reload</button>
+              <button class="ghost" onclick="turnOffProvider()" title="herman mem &lt;project&gt; off — back to the built-in files only.">Turn off provider</button>
+              <button class="danger" onclick="eraseMemory()" title="herman mem &lt;project&gt; reset — erases MEMORY.md and USER.md. herman archives both files first.">Erase built-in memory</button>
+            </div>
           </div>
         </div>
 
@@ -1806,7 +1851,8 @@ let modelCatalog = [], modelCurrent = '', modelProvider = '';
 
 /* ---------- Model board: skills, tools and SOUL.md of the focus project ---------- */
 const MODEL_TABS = {current: () => {}, endpoint: () => loadModelData(), change: () => {},
-                    skills: () => loadSkills(), tools: () => loadTools(), soul: () => loadSoul()};
+                    skills: () => loadSkills(), memory: () => loadMemory(),
+                    tools: () => loadTools(), soul: () => loadSoul()};
 function modelTab(key){
   vtab('model', key);
   const load = MODEL_TABS[key];
@@ -1828,6 +1874,7 @@ let skillData = null, toolData = null;
 async function loadSkills(){
   if (!document.getElementById('skills-table')) return;
   setHint('skills-note', 'reading the installed skills of ' + focusProject + '…');
+  loadSkillSources();
   try {
     skillData = await (await fetch(`/api/skills?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)).json();
   } catch (e){ setHint('skills-note', 'could not read the skill list'); return; }
@@ -1841,10 +1888,11 @@ function renderSkills(){
   const rows = (d.rows || []).filter(r => !q ||
     (r.name + ' ' + r.category + ' ' + r.source + ' ' + r.status).toLowerCase().includes(q));
   setHint('skills-note', rows.length + ' of ' + d.count + ' skills in ' + d.project
-    + ' · listed through `hermes skills list`, so this is what the agent really loads.'
-    + ' A local skill is removed by herman itself (the folder is archived into'
-    + ' ~/.cache/herman/skill-backups/ first), a hub-installed one through `hermes skills uninstall`;'
-    + ' builtin skills live in the install tree and cannot be deleted from here (' + (d.home || '<profile>/skills') + ').');
+    + ' · listed through the engine (`herman skill ' + d.project + '` = `hermes skills list`), so this is'
+    + ' what the agent really loads. A local skill is removed by herman itself (the folder is archived into'
+    + ' ~/.cache/herman/skill-backups/ first), a hub-installed one through `herman skill ' + d.project
+    + ' rm <name>`; builtin skills live in the install tree and cannot be deleted from here ('
+    + (d.home || '<profile>/skills') + ').');
   table('skills-table', ['Skill', 'Category', 'Source', 'Trust', 'Status', ''],
     rows.map(r => [r.name, r.category || '-', r.source, r.trust, r.status,
       r.source === 'hub' ? {node: uninstallSkillBtn(r.name)}
@@ -1855,10 +1903,11 @@ function uninstallSkillBtn(name){
   const b = document.createElement('button');
   b.className = 'tiny ghost';
   b.textContent = 'Uninstall';
-  b.title = 'hermes skills uninstall ' + name + ' --yes · asks you to type the project name first.';
+  b.title = 'herman skill ' + focusProject + ' rm ' + name + ' · the engine removes it'
+          + ' (`hermes skills uninstall ' + name + ' --yes`), after you type the project name.';
   b.onclick = async () => {
     const nm = typeToConfirm('Uninstall the skill "' + name + '"?', focusProject,
-      {note: 'Runs `hermes skills uninstall ' + name + ' --yes` for ' + focusProject
+      {note: 'Runs `herman skill ' + focusProject + ' rm ' + name + '` (the engine\'s `hermes skills uninstall ' + name + ' --yes`) for ' + focusProject
            + '. The skill folder is deleted from that profile; nothing else changes.'});
     if (!nm) return;
     setStatus('busy', 'uninstalling ' + name + '…');
@@ -1889,6 +1938,166 @@ function removeSkillBtn(name){
     await loadSkills();
   };
   return b;
+}
+/* ---------- memory providers and skills from outside ---------- */
+let memoryData = null, skillFindData = null, skillSourcesReady = false;
+async function loadMemory(){
+  if (!document.getElementById('memory-table')) return;
+  setHint('memory-note', 'reading what the engine reports for ' + focusProject + '…');
+  try {
+    memoryData = await (await fetch(`/api/memory?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)).json();
+  } catch (e){ setHint('memory-note', 'could not read the memory status'); return; }
+  renderMemory();
+}
+function memoryPct(used, limit){ return limit ? Math.round(used * 100 / limit) + '%' : '-'; }
+function humanBytes(n){
+  if (!n) return '0 B';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+function renderMemory(){
+  const d = memoryData;
+  if (!d || d.error){ setHint('memory-note', 'memory status unavailable' + (d && d.error ? ': ' + d.error : '')); return; }
+  if (d.error) setHint('memory-note', 'the engine said: ' + d.error);
+  else setHint('memory-note', 'Every session of ' + d.project + ' gets MEMORY.md and USER.md injected, against'
+    + ' a budget of ' + d.memory_limit + ' and ' + d.user_limit + ' characters'
+    + (d.limits_from_config ? ' set in this project's config.yaml' : ' (the engine's defaults)')
+    + '. Sizes are the files on disk, read by herman; the provider list below is the engine's own'
+    + ' (`hermes -p ' + d.project + ' memory status`).');
+  table('memory-table', ['File', 'On disk', 'Budget', 'Used'], [
+    ['MEMORY.md', humanBytes(d.memory_bytes), d.memory_limit, memoryPct(d.memory_bytes, d.memory_limit)],
+    ['USER.md', humanBytes(d.user_bytes), d.user_limit, memoryPct(d.user_bytes, d.user_limit)],
+  ], 'the engine does not report the built-in files');
+  const rows = (d.rows || []).map(r => [r.provider, r.auth || '-', r.note || '-',
+    r.docs ? {node: docLink(r.docs, 'docs')} : '-',
+    {node: r.active ? activeBadge() : setUpProviderBtn(r)}]);
+  table('memory-provider-table', ['Provider', 'Needs', 'What it is', 'Docs', ''], rows,
+    'the engine found no external memory provider plugin');
+}
+function docLink(url, text){
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noreferrer noopener'; a.textContent = text;
+  return a;
+}
+function activeBadge(){
+  const s = document.createElement('span');
+  s.className = 'tag';
+  s.textContent = 'active';
+  s.title = 'This is the provider the engine has configured for the project.';
+  return s;
+}
+function setUpProviderBtn(row){
+  const b = document.createElement('button');
+  b.className = 'tiny';
+  b.textContent = 'Set up';
+  b.title = 'herman mem ' + focusProject + ' add ' + row.provider + ' — herman hands over to the engine\'s'
+    + ' setup wizard (`hermes -p ' + focusProject + ' memory setup ' + row.provider + '`) in a new terminal'
+    + ' window. It asks for the API key or signs you in there; herman never sees that value.';
+  b.onclick = () => setUpProvider(row.provider);
+  return b;
+}
+async function setUpProvider(provider){
+  const okGo = confirm('Set up the "' + provider + '" memory provider for ' + focusProject + '?\n\n'
+    + 'This opens the engine\'s own setup wizard in a new terminal window and hands the project over to'
+    + ' that provider: from then on, what the agent remembers is stored there instead of in MEMORY.md.'
+    + '\n\nThe wizard asks for the key or signs you in; herman never sees or stores it. Nothing is'
+    + ' erased, and `herman mem ' + focusProject + ' off` brings the project back.');
+  if (!okGo) return;
+  setStatus('busy', 'opening the setup wizard for ' + provider + '…');
+  await runPost('memory-setup', focusProject, {provider: provider});
+  await loadMemory();
+}
+async function turnOffProvider(){
+  if (!confirm('Turn the external memory provider off for ' + focusProject + '?\n\n'
+    + 'Runs `herman mem ' + focusProject + ' off`. The project goes back to the built-in MEMORY.md and'
+    + ' USER.md; nothing is deleted, here or at the provider.')) return;
+  await runPost('memory-off', focusProject, {});
+  await loadMemory();
+}
+async function eraseMemory(){
+  const nm = typeToConfirm('Erase the built-in memory of ' + focusProject + '?', focusProject,
+    {note: 'Runs `herman mem ' + focusProject + ' reset`: MEMORY.md and USER.md are erased. herman copies'
+      + ' both into ~/.cache/herman/memory-backups/ first, and the engine does the erasing.'
+      + ' This cannot be undone from here.'});
+  if (!nm) return;
+  await runPost('memory-reset', focusProject, {confirm: nm});
+  await loadMemory();
+}
+async function loadSkillSources(){
+  const sel = document.getElementById('skill-source');
+  if (!sel || skillSourcesReady) return;
+  try {
+    const d = await (await fetch(`/api/skill-sources?t=${TOKEN}`)).json();
+    sel.textContent = '';
+    (d.sources || []).forEach((s, i) => {
+      const o = document.createElement('option');
+      o.value = s; o.textContent = s; if (i === 0) o.selected = true;
+      sel.append(o);
+    });
+    if ((d.sources || []).length) skillSourcesReady = true;
+  } catch (e) { /* the select stays empty; the CLI refuses an unknown source anyway */ }
+}
+async function findSkills(){
+  const q = v('skill-q').trim();
+  if (!q){ setStatus('error', 'Type something to search for.'); return; }
+  const source = v('skill-source') || 'all';
+  setHint('skill-find-note', 'searching the engine\'s sources for "' + q + '"…');
+  try {
+    skillFindData = await (await fetch(`/api/skill-find?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`
+      + `&q=${encodeURIComponent(q)}&source=${encodeURIComponent(source)}`)).json();
+  } catch (e){ setHint('skill-find-note', 'the search failed: ' + e); return; }
+  renderSkillFind();
+}
+function renderSkillFind(){
+  const d = skillFindData;
+  if (!d){ return; }
+  if (d.error){ setHint('skill-find-note', 'search unavailable: ' + d.error); return; }
+  if (!(d.rows || []).length){
+    setHint('skill-find-note', 'nothing matched "' + d.query + '" in ' + d.source
+      + (d.raw ? ' · the engine answered in a shape herman does not parse yet, its own output is in the dock'
+               : ' · searching uses the engine\'s own sources'));
+    if (d.raw) say(d.raw);
+    table('skill-find-table', [], [], 'no matches');
+    return;
+  }
+  setHint('skill-find-note', d.count + ' match(es) for "' + d.query + '" from ' + d.source
+    + ' · installing runs `herman skill ' + d.project + ' add <id>`, and the engine scans the skill first:'
+    + ' a blocked scan verdict is not overridden here.');
+  table('skill-find-table', ['Skill', 'Source', 'What it does', ''], d.rows.map(r => [r.name, r.source || '-',
+    r.description || '-', {node: installSkillBtn(r)}]), 'no matches');
+}
+function installSkillBtn(row){
+  const b = document.createElement('button');
+  b.className = 'tiny';
+  b.textContent = 'Install';
+  b.title = 'herman skill ' + focusProject + ' add ' + (row.identifier || row.name)
+    + ' — the engine installs it into this project.';
+  b.onclick = () => installSkill(row.identifier || row.name);
+  return b;
+}
+async function installSkill(idFromRow){
+  const id = (typeof idFromRow === 'string' && idFromRow ? idFromRow : v('skill-id').trim());
+  if (!id){ setStatus('error', 'Give a registry id or a link to a SKILL.md.'); return; }
+  const nm = typeToConfirm('Install "' + id + '" into ' + focusProject + '?', focusProject,
+    {note: 'Runs `herman skill ' + focusProject + ' add ' + id + '`, which is `hermes -p ' + focusProject
+      + ' skills install ' + id + ' --yes`. The engine fetches it and scans it first; a blocked verdict'
+      + ' stops the install, and herman does not pass --force behind your back.'});
+  if (!nm) return;
+  setStatus('busy', 'installing ' + id + '…');
+  await runPost('skill-install', focusProject, {ident: id, confirm: nm});
+  await loadSkills();
+}
+async function updateSkills(){
+  setStatus('busy', 'updating the installed skills…');
+  await runPost('skill-update', focusProject, {});
+  await loadSkills();
+}
+async function showTaps(){
+  setHint('skill-taps-note', 'asking the engine for the configured sources…');
+  const r = await runPost('skill-taps', focusProject, {sub: 'list'});
+  setHint('skill-taps-note', 'the engine lists the sources above: `herman skill ' + focusProject
+    + ' taps [add owner/repo | rm owner/repo]` changes them.');
 }
 async function loadTools(){
   if (!document.getElementById('tools-list')) return;

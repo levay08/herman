@@ -117,6 +117,34 @@ herman config <name> mcp add <server> --url <endpoint> | --command <cmd> [--args
 herman config <name> mcp enable | disable | rm <server>   (rm asks for the server name)
 ```
 
+The same writes, in the short spellings the help leads with (the long forms above keep working):
+
+```sh
+herman c <name> tg on|off <name> tg token <name> c tg require_mention=false allowed_chats=123
+herman c <name> web backend=exa   |   <name> c web EXA_API_KEY   |   web drop EXA_API_KEY
+herman m <name> add docs <url|cmd ...>   |   m <name> rm|on|off docs
+```
+
+**Memory providers and skills from outside**
+
+Both live in the engine: `hermes memory setup` configures one of its memory-provider plugins, and
+`hermes skills search|install` fetches skills from skills.sh, GitHub, ClawHub and the rest. herman
+surfaces them and runs the same calls, so a project can be pointed at either without leaving the CLI
+or the panel. Nothing here reaches out on its own: a search, an install or a setup only happens
+because you asked for it, and the setup wizard runs in its own terminal window, where the key or the
+OAuth sign-in stays out of herman's hands.
+
+```sh
+herman mem [name]                   MEMORY.md and USER.md against their budget, and the providers
+                                    the engine offers (which it can load, and what each one needs)
+herman mem <name> add <provider>    hand over to `hermes memory setup <provider>`, in a window
+herman mem <name> off | reset       back to the built-in files / erase both (asks, archives first)
+herman skill [name]                 what is installed, as the engine lists it
+herman skill <name> find <words>    search the engine's skill sources (--source github | openai ...)
+herman skill <name> add <id|url>    install one into the project (a scan verdict is not overridden)
+herman skill <name> rm <name> | up | taps   uninstall / update all / extra source repos
+```
+
 ## Web panel
 
 ![herman web panel](herman_web.png)
@@ -137,7 +165,11 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
   looks like a dead button
 - **Model** current model, the **Endpoint** tab (pick one of the common provider APIs or type any
   OpenAI-compatible URL, test it before switching, and the model list follows it) and the model
-  changer
+  changer. Its **Skills** tab lists what the project loads and searches the engine's skill sources to
+  install one from outside, and its **Memory** tab shows `MEMORY.md` / `USER.md` against their budget,
+  the engine's memory providers with what each one needs and a link to its docs, a **Set up** button
+  that opens the engine's own wizard in a terminal window, and `off` / erase (`Erase` archives both
+  files into `~/.cache/herman/memory-backups/` before the engine wipes them)
 - **Insights** history search (click a hit to read the full message), activity, tool counters,
   context health, error digest
 - **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections, and the
@@ -148,8 +180,9 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
 - **Maintenance** backups, disk space, about
 
 Notes: the panel listens on loopback only, and everything inside it that changes state asks you to
-type a name first (a delete, a rename, a removed MCP server and a dropped key ask for the name they
-are about to touch). A write never happens on a page load: every one of them is a POST, and the
+type a name first (a delete, a rename, a removed MCP server, a dropped key, an installed skill and
+erasing the built-in memory all ask for the name they are about to touch). Searching skills is the one
+action that reaches the network, and it runs only when you press Search. A write never happens on a page load: every one of them is a POST, and the
 panel builds the same `herman config` command the CLI accepts instead of editing a file itself. The Hermes
 dashboard (chat, config, keys, MCP, webhooks) stays at `hermes dashboard`, port 9119.
 

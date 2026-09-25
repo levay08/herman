@@ -179,6 +179,44 @@ def main() -> int:
     check("an MCP add with neither endpoint nor command is refused by the writer",
           st == 200 and b"exactly one of" in body and b"exit code 0" not in body, True)
 
+    # ---- memory providers and skills from outside: the same rules as the configure board ---------
+    # All of these must be REFUSED: the run changes nothing, which is what makes it safe to repeat.
+    for label, action in (("erasing memory", "memory-reset"), ("setting up a provider", "memory-setup"),
+                          ("turning a provider off", "memory-off"), ("installing a skill", "skill-install"),
+                          ("uninstalling a skill", "skill-remove"), ("updating skills", "skill-update"),
+                          ("changing a skill source", "skill-taps")):
+        st, _h, _b = call("GET", f"/api/action?t={token}&action={action}&name=default", port=port, host=host)
+        check(f"{label} over GET is refused", st, 405)
+    for action in ("memory-setup", "skill-install", "memory-reset", "skill-remove"):
+        st, _h, _b = call("POST", f"/api/action?t={token}&action={action}", port=port, host=host)
+        check(f"{action} without a project is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=skill-install&name=default"
+                              f"&ident=openai%2Fskills%2Fx%3Brm%20-rf%20%2F&confirm=default",
+                      port=port, host=host)
+    check("a skill id with a shell metacharacter is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=skill-install&name=default"
+                              f"&ident=--force&confirm=default", port=port, host=host)
+    check("a skill id that looks like a flag is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=skill-install&name=default"
+                              f"&ident=openai%2Fskills%2Fprobe&confirm=wrong-name", port=port, host=host)
+    check("installing a skill with the wrong confirmation is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=skill-remove&name=default"
+                              f"&subject=probe-skill", port=port, host=host)
+    check("uninstalling a skill without the typed name is refused", st, 400)
+    st, _h, _b = call("GET", f"/api/action?t={token}&action=skill-find&name=default&q=--delete-all",
+                      port=port, host=host)
+    check("a skill search that looks like a flag is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=skill-taps&name=default&sub=add&repo=not-a-repo",
+                      port=port, host=host)
+    check("a skill source that is not owner/repo is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/action?t={token}&action=memory-reset&name=default", port=port, host=host)
+    check("erasing memory without the typed project name is refused", st, 400)
+    st, _h, body = call("POST", f"/api/action?t={token}&action=memory-setup&name=default"
+                               f"&provider=not-a-provider", port=port, host=host)
+    # The CLI owns that refusal: it streams the provider list and exits 1. Nothing is opened.
+    check("setting up a provider the engine does not offer is refused by the CLI",
+          st == 200 and b"is not a provider" in body and b"exit code 0" not in body, True)
+
     # ---- limits and traversal ----------------------------------------------------------------
     big = b'{"padding":"' + b"a" * (1024 * 1024) + b'"}'
     st, _h, _b = call("POST", f"/api/access-grant?t={token}", port=port, host=host,

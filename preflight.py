@@ -31,7 +31,10 @@ RULES = [
     ("personal path", r"/home/[a-z0-9._-]+|/Users/[A-Za-z0-9._-]+|C:\\\\Users\\\\", "block"),
     ("private host or IP", r"\b(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}\b", "block"),
     ("session id", r"\b20\d{6}_\d{6}_[0-9a-f]{4,}\b", "block"),
-    ("secret-looking token", r"\b(?:sk|pk|ghp|gho|AIza|hf)_?[A-Za-z0-9_-]{12,}\b", "block"),
+    # The separator is required: without it a plain lowercase identifier reads as a key ("skill-find-note"
+    # has the "sk" prefix and 13 characters after it). Real keys carry one: sk-, sk_, ghp_, hf_, AIza...
+    ("secret-looking token",
+     r"\b(?:sk|pk|ghp|gho|hf)[-_][A-Za-z0-9_-]{12,}\b|\bAIza[A-Za-z0-9_-]{12,}\b", "block"),
     ("email address", r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "warn"),
     ("provider domain", r"\b(?:paas\.id|openrouter\.ai|api\.openai\.com|anthropic\.com)\b", "warn"),
     ("author name", r"\bLevay\b", "warn"),

@@ -30,6 +30,7 @@ import time
 import json
 import traceback
 import secrets
+import shlex
 import socket
 import urllib.error
 import urllib.parse
@@ -1915,6 +1916,13 @@ EVERYDAY (short: the project is optional, it defaults to the focus project)
   {PROG} sec                          the panel's security battery
   {PROG} a [name]                     keys, hosts, git credential, connections
   {PROG} g [name] ...                 git status / identity / remotes
+  {PROG} mem [name]                   built-in memory vs budget, and the engine's providers
+  {PROG} mem [name] add <provider>    hand over to the engine's setup wizard (key asked there)
+  {PROG} mem [name] off|reset         built-in only / erase both files (asks, and archives first)
+  {PROG} skill [name]                 what is installed, through the engine
+  {PROG} skill [name] find <words>    search the engine's skill sources (needs the network)
+  {PROG} skill [name] add <id|url>    install one into the project (the engine scans it first)
+  {PROG} skill [name] rm <name>|up|taps   uninstall / update all / list extra sources
 
 ENTER & SELECT (long spellings, same thing)
   {PROG} -u, --use [name]      enter a session (no name: last used project)
@@ -2908,7 +2916,7 @@ SHAPE_RULES = {
                 "safe": "A-Za-z0-9._-", "max": 64},
     "state": {"re": r"on|off", "rule": "on or off", "not": "never allowed: anything else",
               "safe": "a-z", "max": 3},
-    "sub": {"re": r"add|rm|enable|disable",
+    "sub": {"re": r"add|rm|enable|disable|list",
             "rule": "what to do with the entry: add, rm, enable or disable",
             "not": "never allowed: anything else", "safe": "a-z", "max": 8},
     "set": {"re": r"[A-Za-z0-9_.-]{1,64}=[^\x00-\x1f]{0,300}",
@@ -2924,6 +2932,17 @@ SHAPE_RULES = {
                     "rule": "the command that starts a stdio MCP server, e.g. npx or /usr/bin/node",
                     "not": "never allowed: spaces, quotes or control characters",
                     "safe": "A-Za-z0-9._/-", "max": 200},
+    # the skills board: what to install (a registry path, a name, or a link to a SKILL.md) and which
+    # extra source repo to add or drop
+    "ident": {"re": r"(?:https?://[^\x00-\x1f]{1,380}|[A-Za-z0-9][A-Za-z0-9._/-]{0,199})",
+              "rule": "a skill id: a registry path, a name, or an https link to a SKILL.md "
+                      "(example: openai/skills/pdf-tools)",
+              "not": "never allowed: a leading dash, spaces, quotes or control characters",
+              "safe": "", "max": 400},
+    "repo": {"re": r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}",
+             "rule": "a GitHub repo: owner/name (example: anthropics/skills)",
+             "not": "never allowed: spaces, quotes, a leading dash or more than one slash",
+             "safe": "A-Za-z0-9._-/", "max": 202},
     "mcp_args": {"re": r"[^\x00-\x1f]{0,300}",
                  "rule": "the command's arguments, comma separated (example: -y,server-fetch)",
                  "not": "never allowed: control characters",
@@ -3235,7 +3254,8 @@ def cmd_web(argv: list[str]):
                             "meta": meta, "paragraphs": paras})
                 return
             if u.path in ("/api/usage", "/api/search", "/api/insights",
-                          "/api/skills", "/api/tools", "/api/soul"):
+                          "/api/skills", "/api/tools", "/api/soul", "/api/memory",
+                          "/api/skill-find"):
                 nm = q.get("name", [""])[0] or active_profile() or load_state().get("last") \
                     or DEFAULT_HERMES
                 if not profile_exists(nm):
@@ -3247,12 +3267,22 @@ def cmd_web(argv: list[str]):
                     self._json(search_history(nm, q.get("q", [""])[0]))
                 elif u.path == "/api/skills":
                     self._json(skills_report(nm))
+                elif u.path == "/api/memory":
+                    self._json(memory_report(nm))
+                elif u.path == "/api/skill-find":
+                    # Searching is the one panel action that reaches the network, and only because the
+                    # operator pressed Search: herman keeps no skill index of its own.
+                    self._json(skill_find(nm, q.get("q", [""])[0], source=q.get("source", ["all"])[0],
+                                          limit=q.get("limit", ["10"])[0]))
                 elif u.path == "/api/tools":
                     self._json(tools_report(nm))
                 elif u.path == "/api/soul":
                     self._json(soul_report(nm))
                 else:
                     self._json(insights_report(nm))
+                return
+            if u.path == "/api/skill-sources":
+                self._json({"sources": list(SKILL_SOURCES)})
                 return
             if u.path == "/api/health":
                 self._json({"ok": True, "tool": PROG, "version": VERSION,
@@ -3392,7 +3422,10 @@ def cmd_web(argv: list[str]):
                     self._json(remove_skill(nm, item))
                     return
                 if u.path == "/api/uninstall-skill":
-                    res = run_hermes(["skills", "uninstall", item, "--yes"], nm, quiet=True)
+                    # Same words the button's tooltip shows: the CLI verb does the work, so the panel
+                    # and the terminal cannot drift apart (the typed confirmation happens in the page).
+                    res = run([sys.executable, str(Path(__file__).resolve()), "skill", nm, "rm", item,
+                               "-y"], capture=True)
                 else:
                     want = (q.get("enabled", ["1"])[0] or "1") in ("1", "true", "yes")
                     res = run_hermes(["tools", "enable" if want else "disable", item], nm, quiet=True)
@@ -3460,6 +3493,8 @@ def cmd_web(argv: list[str]):
                 "access-revoke-key", "access-add-agent", "access-revoke-agent",
                 "access-gitcred-add", "access-gitcred-rm", "model-set-endpoint",
                 "rename", "config-set", "config-remove",
+                "memory-setup", "memory-off", "memory-reset", "skill-install", "skill-update",
+                "skill-remove", "skill-taps",
             }
             if action in mutating and method != "POST":
                 self._json({"error": f"'{action}' changes state: send it with POST"}, 405)
@@ -3518,6 +3553,23 @@ def cmd_web(argv: list[str]):
                 # config.yaml / .env. The panel never edits a file itself: it builds the same
                 # `herman config` command a person would type, and the CLI does the writing.
                 "config": lambda: (["c", name] if name else ["c"]) + tail,
+                # Memory providers and skills from outside: the panel runs the same short verbs a
+                # person types, and herman passes every call through to the engine.
+                "memory": lambda: (["mem", name] if name else ["mem"]) + tail,
+                "memory-setup": lambda: ["mem", name, "add", only("provider")] + tail,
+                "memory-off": lambda: ["mem", name, "off"] + tail,
+                "memory-reset": lambda: ["mem", name, "reset", "-y"] + tail,
+                "skill-find": lambda: (["skill", name, "find", only("q")]
+                                       + (["--source", only("source")] if only("source") else [])
+                                       + (["--limit", only("limit")] if only("limit") else []) + tail),
+                "skill-install": lambda: (["skill", name, "add", only("ident")]
+                                          + (["--category", only("category")] if only("category") else [])
+                                          + tail),
+                "skill-update": lambda: (["skill", name, "up"]
+                                         + ([only("subject")] if only("subject") else []) + tail),
+                "skill-remove": lambda: ["skill", name, "rm", only("subject"), "-y"] + tail,
+                "skill-taps": lambda: (["skill", name, "taps"] + ([only("sub")] if only("sub") else [])
+                                       + ([only("repo")] if only("repo") else []) + tail),
                 "config-set": lambda: panel_config_argv(name, q) + tail,
                 "config-remove": lambda: panel_config_argv(name, q, remove=True) + tail,
             }
@@ -3526,7 +3578,9 @@ def cmd_web(argv: list[str]):
             if not name and action in ("git-init", "git-set-workdir", "git-set-user", "git-set-remote",
                                        "git-rm-remote", "git-set-helper", "access-set-env",
                                        "model-set", "model-set-endpoint", "model-probe",
-                                       "config-set", "config-remove"):
+                                       "config-set", "config-remove", "memory", "memory-setup",
+                                       "memory-off", "memory-reset", "skill-find", "skill-install",
+                                       "skill-update", "skill-remove", "skill-taps"):
                 self._json({"error": "this action requires a project name"}, 400)
                 return
             confirm_targets = {
@@ -3546,6 +3600,13 @@ def cmd_web(argv: list[str]):
                 "config-remove": (only("var") if only("area") == "web"
                                   else (only("secret") if only("area") == "chat"
                                         else only("subject"))),
+                # Erasing the built-in memory and uninstalling a skill both end in the engine: the
+                # name of what goes (the project, the skill) is typed back before herman runs it.
+                "memory-reset": name,
+                "skill-remove": only("subject"),
+                # Installing fetches third-party code into the project: the project name is typed back,
+                # exactly as the page's own dialog asks for it.
+                "skill-install": name,
             }
             if action in confirm_targets:
                 want = confirm_targets[action]
@@ -3667,7 +3728,12 @@ def cmd_web(argv: list[str]):
 
 
 def open_terminal(name: str) -> bool:
-    """Open a project session in a new terminal window (panel button).
+    """Open a project session in a new terminal window (panel button)."""
+    return open_terminal_cmd(hermes_cmd([], name), name)
+
+
+def open_terminal_cmd(cmd: list[str], title: str = "") -> bool:
+    """Open any command in a new terminal window, outside herman's own cgroup.
 
     The window is started *outside* herman's own cgroup whenever the user manager allows it: the
     panel normally runs as a systemd unit (herman-web.service) with the default KillMode=control-group,
@@ -3676,7 +3742,6 @@ def open_terminal(name: str) -> bool:
     panel - restarting the panel closed the session window the user was typing in. A transient
     `systemd-run --user --scope` gives the window its own scope, which a panel restart leaves alone.
     """
-    cmd = hermes_cmd([], name)
     candidates = [
         ("terminator", ["terminator", "-x"] + cmd),
         ("gnome-terminal", ["gnome-terminal", "--"] + cmd),
@@ -6244,6 +6309,442 @@ def remove_skill(name: str, skill: str, *, dry: bool = False) -> dict:
     return {"ok": True, "path": str(folder), "backup": tar_path.name, "dry": False}
 
 
+# ------------------------------- memory providers · skills from outside ---
+
+# One line per memory provider the engine ships, taken from that provider's own README in the engine
+# tree (hermes-agent/plugins/memory/<name>/README.md). herman keeps no claims of its own here, and the
+# list it SHOWS is always the engine's (`hermes -p <p> memory status`), so a provider dropped in as an
+# external plugin appears too, and nothing can be offered that the engine cannot load.
+MEM_PROVIDER_NOTES = {
+    "byterover":   ("local-first; BRV_API_KEY only for optional cloud sync", "https://byterover.dev"),
+    "hindsight":   ("cloud API key, or local embedded, or your own instance",
+                    "https://ui.hindsight.vectorize.io"),
+    "holographic": ("local SQLite store, no account", ""),
+    "honcho":      ("cloud account (OAuth or API key), or self-hosted",
+                    "https://docs.honcho.dev/v3/guides/integrations/hermes"),
+    "mem0":        ("mem0.ai API key, or a self-hosted dashboard", "https://app.mem0.ai"),
+    "openviking":  ("your own OpenViking endpoint (OPENVIKING_ENDPOINT)", ""),
+    "retaindb":    ("paid account, its README lists USD 20/month", "https://www.retaindb.com"),
+    "supermemory": ("hosted API key, or self-hosted (`npx supermemory local`)",
+                    "https://app.supermemory.ai/integrations?connect=hermes"),
+}
+
+# The engine's defaults for the built-in memory files (hermes_cli/config_defaults.py:
+# memory_char_limit 2200, user_char_limit 1375). A project may raise them in its own config.yaml, and
+# that value wins here.
+MEM_CHAR_DEFAULT, USER_CHAR_DEFAULT = 2200, 1375
+
+# The sources `hermes skills search --source` accepts, in the engine's order. An unknown source is
+# refused here, so the message names the real list instead of a traceback from the engine.
+SKILL_SOURCES = ("all", "official", "skills-sh", "well-known", "github", "clawhub", "lobehub",
+                 "browse-sh", "nvidia", "openai", "anthropic", "huggingface", "voltagent", "gstack",
+                 "minimax")
+
+# A registry identifier (owner/repo/skill), a bare name, or a direct link to a SKILL.md: the shapes the
+# engine itself accepts. Anything else is refused before a process starts.
+SKILL_ID_RE = re.compile(r"^https?://\S+$|^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+){0,2}$")
+
+
+def memory_limits(name: str) -> tuple[int, int, bool]:
+    """Character budgets for MEMORY.md / USER.md: the project's own, else the engine's defaults."""
+    mem, usr, own = MEM_CHAR_DEFAULT, USER_CHAR_DEFAULT, False
+    for key, which in (("memory_char_limit", "mem"), ("user_char_limit", "user")):
+        raw = _yaml_block(profile_home(name) / "config.yaml", "memory").get(key)
+        if raw is None:
+            continue
+        try:
+            value = int(str(raw).strip().strip("'\""))
+        except ValueError:
+            continue
+        if value > 0:
+            if which == "mem":
+                mem = value
+            else:
+                usr = value
+            own = True
+    return mem, usr, own
+
+
+def memory_report(name: str) -> dict:
+    """Built-in memory files, their budget, and the external provider the engine has configured.
+
+    `hermes -p <n> memory status` is the source: it reads the engine's own plugin discovery, which
+    covers the bundled providers and any dropped into the profile. herman adds only the note and the
+    docs link from MEM_PROVIDER_NOTES.
+    """
+    ensure_profile(name)
+    home = profile_home(name)
+    sizes = {}
+    for var, fname in (("memory", "MEMORY.md"), ("user", "USER.md")):
+        path = home / "memories" / fname
+        sizes[var] = path.stat().st_size if path.is_file() else 0
+    mem_limit, user_limit, from_config = memory_limits(name)
+    res = run_hermes(["memory", "status"], name, quiet=True)
+    text = (res.stdout or "") + (res.stderr or "")
+    found = re.search(r"^\s*Provider:\s*(.+)$", text, re.M)
+    active = found.group(1).strip() if found else ""
+    if active.lower().startswith("(none"):
+        active = ""
+    rows = []
+    for line in text.splitlines():
+        bullet = re.match(r"^\s*[\u2022\u00b7*+-]\s+([A-Za-z0-9_.-]+)\s*(?:\(([^)]*)\))?\s*$", line)
+        if not bullet:
+            continue
+        provider = bullet.group(1)
+        note, docs = MEM_PROVIDER_NOTES.get(provider, ("", ""))
+        rows.append({"provider": provider, "auth": (bullet.group(2) or "").strip(), "note": note,
+                     "docs": docs, "active": bool(active) and provider == active})
+    return {"project": name, "active": active, "rows": rows, "count": len(rows),
+            "memory_bytes": sizes["memory"], "user_bytes": sizes["user"],
+            "memory_limit": mem_limit, "user_limit": user_limit, "limits_from_config": from_config,
+            "error": "" if res.returncode == 0
+                     else (res.stderr or res.stdout or "memory status failed").strip()[:300]}
+
+
+def print_memory_report(rep: dict):
+    """Read-out behind `herman mem [project]`."""
+    def used(now: int, limit: int) -> str:
+        pct = int(round(now * 100 / limit)) if limit else 0
+        return f"{human_size(now):>7} / {human_size(limit):<7} {pct:>3}%"
+
+    lines = [f"built-in : MEMORY.md {used(rep['memory_bytes'], rep['memory_limit'])}",
+             f"           USER.md   {used(rep['user_bytes'], rep['user_limit'])}",
+             f"provider : {rep['active'] or 'none, built-in only'}"]
+    if rep["limits_from_config"]:
+        lines.append("budget   : from this project's config.yaml (memory.memory_char_limit /"
+                     " memory.user_char_limit)")
+    print_frame(f"memory \u00b7 {rep['project']}", lines, color=blue, width=min(term_width(), 104))
+    print()
+    if rep["error"]:
+        warn(rep["error"])
+    if rep["rows"]:
+        print(dim("  external providers the engine offers here (`hermes -p <project> memory status`):"))
+        for row in rep["rows"]:
+            mark = "*" if row["active"] else " "
+            print(f"   {mark} {row['provider']:<12} {row['auth']:<18} {row['note']}")
+            if row["docs"]:
+                print(dim(f"                    {row['docs']}"))
+    else:
+        print(dim("  no external provider plugin found by the engine"))
+    print()
+    print(dim(f"  turn one on : {PROG} mem {rep['project']} add <provider>"
+              "   (the engine's own wizard opens; it asks for the key or the OAuth sign-in)"))
+    print(dim(f"  built-in only: {PROG} mem {rep['project']} off"
+              f"     erase both files: {PROG} mem {rep['project']} reset"))
+
+
+def memory_reset(name: str, *, assume_yes: bool = False, dry: bool = False) -> int:
+    """Erase the built-in memory, after archiving both files inside herman's own cache.
+
+    The engine's `hermes memory reset` does the erasing; herman only keeps a copy first, because this
+    is the one memory action nothing can undo.
+    """
+    home = profile_home(name)
+    present = [p for p in (home / "memories" / "MEMORY.md", home / "memories" / "USER.md") if p.is_file()]
+    if not present:
+        die(f"{name} has no MEMORY.md or USER.md to erase")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    bdir = HERMAN_CACHE / "memory-backups" / f"{name}-{stamp}"
+    if dry:
+        print(dim(f"  [dry-run] archive {len(present)} file(s) to {bdir}, then `hermes -p {name} memory reset`"))
+        return 0
+    if not confirm(f"Erase the built-in memory of {bold(name)}?", phrase=name, assume_yes=assume_yes):
+        info("nothing erased")
+        return 1
+    try:
+        bdir.mkdir(parents=True, exist_ok=True)
+        bdir.chmod(0o700)
+        for path in present:
+            shutil.copy2(path, bdir / path.name)
+    except OSError as exc:
+        die(f"could not archive the memory files first ({exc}); nothing was erased")
+    res = run_hermes(["memory", "reset"], name, quiet=True)
+    if res.returncode == 0:
+        ok(f"memory erased \u00b7 the previous files are in {bdir}")
+        return 0
+    print(red((res.stderr or res.stdout or "memory reset failed").strip()))
+    return res.returncode
+
+
+def do_memory(args: list[str], *, dry: bool = False, assume_yes: bool = False) -> int:
+    """`herman mem [project] [add <provider> | off | reset]`."""
+    project, rest = _short_project(args)
+    what = rest[0].lower() if rest else ""
+    tail = rest[1:]
+    rep = memory_report(project)
+    known = {row["provider"]: row for row in rep["rows"]}
+    if not what or what in ("status", "ls", "list", "providers"):
+        print_memory_report(rep)
+        return 0
+    if what in ("add", "on", "use", "setup"):
+        if not tail:
+            die(f"which provider? one of: {', '.join(known) or 'none found by the engine'}")
+        provider = tail[0].lower()
+        if provider not in known:
+            die(f"'{provider}' is not a provider this engine offers: "
+                f"{', '.join(known) or 'none found'}")
+        cmd = hermes_cmd(["memory", "setup", provider], project)
+        print(dim("  " + " ".join(shlex.quote(part) for part in cmd)))
+        if dry:
+            return 0
+        if open_terminal_cmd(cmd, f"memory setup \u00b7 {project}"):
+            ok(f"the engine's setup wizard for {provider} is open in a new window")
+            info("it asks for the key or signs you in; herman never sees or stores that value")
+            return 0
+        warn("no terminal window here: run the command above to finish the setup")
+        return 1
+    if what in ("off", "disable"):
+        res = run_hermes(["memory", "off"], project, quiet=True)
+        if res.returncode == 0:
+            ok(f"{project} is back to built-in memory only")
+            return 0
+        print(red((res.stderr or res.stdout or "memory off failed").strip()))
+        return res.returncode
+    if what in ("reset", "erase"):
+        return memory_reset(project, assume_yes=assume_yes, dry=dry)
+    die(f"'{what}' is not a memory verb: add <provider>, off, reset, or nothing to read it")
+
+
+def skill_find(name: str, query: str, *, source: str = "all", limit: int = 10) -> dict:
+    """Search the engine's skill sources. The one call here that needs the network.
+
+    herman runs it when the operator asks for a search (a verb or a button), never on its own; the
+    answer is the engine's (`hermes skills search`), so what is offered is installable.
+    """
+    ensure_profile(name)
+    if source not in SKILL_SOURCES:
+        return {"error": f"unknown source '{source}': one of {' '.join(SKILL_SOURCES)}", "rows": []}
+    try:
+        count = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        count = 10
+    res = run_hermes(["skills", "search", query, "--limit", str(count), "--json"], name, quiet=True)
+    text = (res.stdout or "").strip()
+    rows: list[dict] = []
+    parsed = None
+    if text:
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            start = min([i for i in (text.find("["), text.find("{")) if i >= 0] or [-1])
+            if start >= 0:
+                try:
+                    parsed = json.loads(text[start:])
+                except ValueError:
+                    parsed = None
+    items = parsed if isinstance(parsed, list) else (parsed or {}).get("results") if isinstance(parsed, dict) else None
+    for item in (items or []):
+        if not isinstance(item, dict):
+            continue
+        ident = str(item.get("identifier") or item.get("id") or item.get("install_id")
+                    or item.get("slug") or "")
+        rows.append({"name": str(item.get("name") or item.get("title") or ident),
+                     "identifier": ident,
+                     "source": str(item.get("source") or item.get("provider") or source),
+                     "description": " ".join(str(item.get("description") or "").split())[:220]})
+    out = {"project": name, "query": query, "source": source, "rows": rows, "count": len(rows),
+           "error": "" if res.returncode == 0
+                    else (res.stderr or res.stdout or "skills search failed").strip()[:300]}
+    if not rows and text and not out["error"]:
+        # The engine answered in a shape this parser does not know. Show its own text rather than an
+        # empty table, so a format change is visible instead of looking like "no results".
+        out["raw"] = text[:2000]
+    return out
+
+
+def skill_install(name: str, ident: str, *, category: str = "", force: bool = False,
+                  dry: bool = False) -> dict:
+    """Install a skill from the engine's sources into one project.
+
+    Scan verdicts stay final: `--force` is only passed when the operator asked for it on the command
+    line, so a blocked skill cannot ride in through the panel or a convenience path.
+    """
+    ensure_profile(name)
+    if not ident or not SKILL_ID_RE.match(ident):
+        return {"ok": False, "error": "give a registry id (owner/repo/skill), a name, or an https:// "
+                                      "link to a SKILL.md"}
+    if category and not re.fullmatch(r"[A-Za-z0-9._-]{1,40}", category):
+        return {"ok": False, "error": "category must be a simple folder name"}
+    args = ["skills", "install", ident, "--yes"]
+    if category:
+        args += ["--category", category]
+    if force:
+        args += ["--force"]
+    if dry:
+        return {"ok": True, "dry": True, "cmd": " ".join(hermes_cmd(args, name)), "output": ""}
+    res = run_hermes(args, name, quiet=True)
+    return {"ok": res.returncode == 0, "dry": False, "output": ((res.stdout or "") + (res.stderr or "")).strip()[:4000],
+            "error": "" if res.returncode == 0 else (res.stderr or res.stdout or "install failed").strip()[:400]}
+
+
+def skill_update(name: str, skill: str = "", *, force: bool = False, dry: bool = False) -> dict:
+    """Bring installed skills up to date (`hermes skills update`). Local edits are skipped unless forced."""
+    ensure_profile(name)
+    args = ["skills", "update"]
+    if skill:
+        if not SKILL_ID_RE.match(skill):
+            return {"ok": False, "error": f"'{skill}' is not a skill name"}
+        args.append(skill)
+    if force:
+        args.append("--force")
+    if dry:
+        return {"ok": True, "dry": True, "cmd": " ".join(hermes_cmd(args, name)), "output": ""}
+    res = run_hermes(args, name, quiet=True)
+    return {"ok": res.returncode == 0, "dry": False,
+            "output": ((res.stdout or "") + (res.stderr or "")).strip()[:4000],
+            "error": "" if res.returncode == 0 else (res.stderr or res.stdout or "update failed").strip()[:400]}
+
+
+def skill_taps(name: str, sub: str = "list", repo: str = "", *, dry: bool = False) -> dict:
+    """Skill sources from outside the built-in ones: list, add or remove a GitHub repo tap."""
+    ensure_profile(name)
+    sub = (sub or "list").lower()
+    if sub in ("list", "ls"):
+        args = ["skills", "tap", "list"]
+    elif sub in ("add", "rm", "remove"):
+        if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo or ""):
+            return {"ok": False, "error": "a tap is a GitHub repo: owner/repo"}
+        args = ["skills", "tap", "add" if sub == "add" else "remove", repo]
+    else:
+        return {"ok": False, "error": f"'{sub}' is not a tap verb: list, add <owner/repo>, rm <owner/repo>"}
+    if dry:
+        return {"ok": True, "dry": True, "cmd": " ".join(hermes_cmd(args, name)), "output": ""}
+    res = run_hermes(args, name, quiet=True)
+    return {"ok": res.returncode == 0, "dry": False,
+            "output": ((res.stdout or "") + (res.stderr or "")).strip()[:4000],
+            "error": "" if res.returncode == 0 else (res.stderr or res.stdout or "tap failed").strip()[:400]}
+
+
+def print_skills(name: str):
+    """Read-out behind `herman skill [project]`."""
+    rep = skills_report(name)
+    lines = [f"source   : {rep['count']} installed in {rep['home']}"]
+    print_frame(f"skills \u00b7 {name}", lines, color=blue, width=min(term_width(), 104))
+    print()
+    if rep["error"]:
+        warn(rep["error"])
+    for row in rep["rows"]:
+        print(f"   {row['name']:<30} {row['source']:<8} {row['category']:<16} {row['status']}")
+    if not rep["rows"]:
+        print(dim("   nothing installed in this project yet"))
+    print()
+    print(dim(f"  find one     : {PROG} skill {name} find <words> [--source github]"))
+    print(dim(f"  install it   : {PROG} skill {name} add <id|https://.../SKILL.md>"))
+    print(dim(f"  update all   : {PROG} skill {name} up        sources: {PROG} skill {name} taps"))
+
+
+def do_skills(args: list[str], *, dry: bool = False, assume_yes: bool = False) -> int:
+    """`herman skill [project] [find <q> | add <id|url> | rm <name> | up | taps]`."""
+    project, rest = _short_project(args)
+    what = rest[0].lower() if rest else ""
+    tail = rest[1:]
+    if not what or what in ("ls", "list"):
+        print_skills(project)
+        return 0
+    if what in ("find", "search"):
+        if not tail:
+            die(f"what to search for? `{PROG} skill {project} find <words>`")
+        source = "all"
+        limit = 10
+        words = []
+        i = 0
+        while i < len(tail):
+            if tail[i] == "--source" and i + 1 < len(tail):
+                source = tail[i + 1].lower()
+                i += 2
+                continue
+            if tail[i] == "--limit" and i + 1 < len(tail):
+                limit = tail[i + 1]
+                i += 2
+                continue
+            words.append(tail[i])
+            i += 1
+        if not words:
+            die(f"what to search for? `{PROG} skill {project} find <words>`")
+        res = skill_find(project, " ".join(words), source=source, limit=limit)
+        if res.get("error"):
+            die(res["error"]) if not res.get("raw") else warn(res["error"])
+        rows = res.get("rows") or []
+        print_frame(f"skills \u00b7 {project} \u00b7 search \u00b7 {res['query']}",
+                    [f"source   : {res['source']}", f"matches  : {len(rows)}"],
+                    color=blue, width=min(term_width(), 104))
+        print()
+        for row in rows:
+            print(f"   {row['name'][:32]:<34} {row['source']:<12} {row['description'][:70]}")
+            if row["identifier"]:
+                print(dim(f"      {PROG} skill {project} add {row['identifier']}"))
+        if res.get("raw"):
+            print(dim("   the engine answered in a shape herman does not parse yet; its own output:"))
+            print(res["raw"])
+        elif not rows:
+            print(dim("   nothing matched"))
+        print()
+        print(dim("  searching uses the engine's sources; herman keeps no skill index of its own"))
+        return 0
+    if what in ("add", "install"):
+        if not tail:
+            die(f"add what? `{PROG} skill {project} add <owner/repo/skill|https://.../SKILL.md>`")
+        ident, category, force = tail[0], "", False
+        i = 1
+        while i < len(tail):
+            if tail[i] == "--category" and i + 1 < len(tail):
+                category = tail[i + 1]
+                i += 2
+                continue
+            if tail[i] in ("--force", "-f"):
+                force = True
+                i += 1
+                continue
+            die(f"'{tail[i]}' is not an option here: [--category <name>] [--force]")
+        if force:
+            warn("--force asks the engine to install despite a blocked scan verdict")
+            if not confirm(f"Install {ident} even though the scan may have blocked it?", phrase=ident,
+                           assume_yes=assume_yes):
+                info("nothing installed")
+                return 1
+        res = skill_install(project, ident, category=category, force=force, dry=dry)
+        if res.get("cmd"):
+            print(dim("  [dry-run] " + res["cmd"]))
+        if res.get("output"):
+            print(res["output"])
+        if res["ok"]:
+            ok(f"{ident} installed into {project}")
+            print_skills(project)
+            return 0
+        die(res.get("error") or f"could not install {ident}")
+    if what in ("rm", "remove", "uninstall"):
+        if not tail:
+            die(f"remove which skill? `{PROG} skill {project} rm <name>`")
+        target = tail[0]
+        if not confirm(f"Uninstall the skill {bold(target)} from {project}?", phrase=project,
+                       assume_yes=assume_yes):
+            info("nothing removed")
+            return 1
+        res = run_hermes(["skills", "uninstall", target, "--yes"], project, quiet=True)
+        if res.returncode == 0:
+            ok(f"{target} uninstalled")
+            return 0
+        print(red((res.stderr or res.stdout or "uninstall failed").strip()))
+        return res.returncode
+    if what in ("up", "update"):
+        res = skill_update(project, tail[0] if tail else "", dry=dry)
+        if res.get("output"):
+            print(res["output"])
+        if res["ok"]:
+            ok("skills updated")
+            return 0
+        die(res.get("error") or "update failed")
+    if what in ("taps", "sources"):
+        sub = tail[0] if tail else "list"
+        res = skill_taps(project, sub, tail[1] if len(tail) > 1 else "", dry=dry)
+        if res.get("output"):
+            print(res["output"])
+        if res["ok"]:
+            return 0
+        die(res.get("error") or "tap command failed")
+    die(f"'{what}' is not a skill verb: find <words>, add <id>, rm <name>, up, taps")
+
+
 def tools_report(name: str) -> dict:
     """Toolsets of one project with their enabled/disabled state (`hermes tools list`)."""
     ensure_profile(name)
@@ -7891,6 +8392,10 @@ def main(argv: list[str]) -> int:
         do_git(nm, None, dry=dry)
         return 0
 
+    if cmd in ("mem", "memory"):
+        return do_memory(rest[1:], dry=dry, assume_yes=assume_yes)
+    if cmd in ("skill", "skills"):
+        return do_skills(rest[1:], dry=dry, assume_yes=assume_yes)
     if cmd in ("config", "configure", "cfg", "c", "m"):
         args = rest[1:]
         sub = args[0] if args and not args[0].startswith("-") else ""
