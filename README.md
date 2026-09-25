@@ -8,8 +8,36 @@ web panel, on top of the `hermes` binary you already have. It simplified the Her
 (create, enter, back up, inspect, delete), shows what runs and what each one costs, reads the analytics
 Hermes already writes to `state.db`, and turns those token and prompt-cache numbers into plain summary:
 how you and the agent actually got there, and what to change next time. It never reimplements the
-agent, never edits your config by hand (changes go through `hermes config set`, `hermes profile use`
-and `hermes profile delete`), and it uploads nothing anywhere.
+agent: sessions, model switches and profile changes go through the `hermes` binary, and the settings
+herman writes itself (`herman config`) go into one project's own `config.yaml` / `.env`, after a
+backup. It uploads nothing anywhere.
+
+## The command shape: why herman is shorter than the engine it wraps
+
+herman is a front door, not `hermes` under another name. The project is implicit (it defaults to the
+one you are working in, else the last one you used), values are positional, and a setting is simply
+`key=value`. Same jobs, words per command:
+
+| job | hermes | herman |
+|---|---|---|
+| enter a session | `hermes -p web` | `herman web` |
+| switch model | `hermes -p web config set model.default opus` | `herman model opus` |
+| switch endpoint | `hermes -p web config set model.base_url URL` | `herman model @URL` |
+| enable telegram | `hermes -p web gateway setup` | `herman c tg on` |
+| a chat setting | `hermes -p web config set telegram.require_mention false` | `herman c tg require_mention=false` |
+| web backend | `hermes -p web config set web.backend exa` | `herman c web backend=exa` |
+| a backend key | (edit `.env` by hand) | `herman c web EXA_API_KEY` |
+| add an MCP server | `hermes -p web mcp add docs --url URL` | `herman m add docs URL` |
+| remove an MCP server | `hermes -p web mcp rm docs` | `herman m rm docs` |
+| store an API key | (edit `.env` by hand) | `herman key EXA_API_KEY` |
+| project history | `hermes -p web insights` | `herman hist` |
+| health check | `hermes -p web doctor` | `herman -d` |
+
+Across the 18 jobs where both CLIs have a verb: hermes 101 words, herman 59 (42% fewer), and herman
+is shorter in every one of them. The long spellings keep working
+(`herman config web chat telegram --set require_mention=false`); the short ones are what `herman -h`
+leads with and what the panel runs when you press a button, so the CLI and the web board say the
+same words.
 
 ## Requirements
 

@@ -957,6 +957,57 @@ def _web_env_names() -> set[str]:
     return {env for _n, env, _note in WEB_PROVIDERS if env}
 
 
+def panel_config_argv(name: str, q: dict, *, remove: bool = False) -> list[str]:
+    """The short `herman c` / `herman m` command behind one panel write.
+
+    The panel owns no file editing of its own: it builds the same words a person would type, which is
+    also what its buttons show in their tooltips. Secrets never appear here - they travel in the
+    child's environment (HERMAN_SECRET), which is why a token write is the bare `token` word.
+    """
+    def one(key: str, default: str = "") -> str:
+        value = q.get(key, [default])
+        return str(value[0]) if value else default
+
+    area, subject, sub = one("area"), one("subject"), one("sub")
+    if area == "mcp":
+        if remove:
+            return ["m", name, "rm", subject, "-y"]
+        if sub in ("enable", "disable"):
+            return ["m", name, "on" if sub == "enable" else "off", subject]
+        if sub == "add":
+            url = one("mcp_url")
+            if url:
+                return ["m", name, "add", subject, url]
+            argv = ["m", name, "add", subject, one("mcp_command")]
+            argv += [part.strip() for part in one("mcp_args").split(",") if part.strip()]
+            return argv
+        return ["m", name]
+    argv = ["c", name]
+    if area == "chat":
+        argv.append(subject or "chat")
+        if remove:
+            return argv + ["clear", "-y"]
+        if one("state") == "on":
+            argv.append("on")
+        elif one("state") == "off":
+            argv.append("off")
+        if "value" in q or "token" in q:
+            argv.append("token")
+        if one("set"):
+            argv.append(one("set"))
+        return argv
+    if area == "web":
+        argv.append("web")
+        if remove:
+            return argv + ["drop", one("var"), "-y"]
+        if one("set"):
+            argv.append(one("set"))
+        if one("var"):
+            argv.append(one("var"))
+        return argv
+    return argv
+
+
 def secret_input(prompt: str) -> str:
     """A secret the operator hands over: from HERMAN_SECRET (the panel's POST body) or the terminal.
 
@@ -1134,6 +1185,145 @@ def print_config_report(rep: dict):
     print(dim(f"    {PROG} config {name} mcp enable|disable|rm <server>"))
     print(dim("  every write touches only that project's config.yaml / .env, after a backup; "
               "herman never connects anywhere."))
+
+
+# The short grammar: `herman c [project] <area> <what...>` and `herman m [project] <act> <name> ...`.
+# Naming the project is optional, values are positional and a setting is simply `key=value`, so the
+# everyday command is shorter than the engine's own for the same write. Everything the long form can
+# do is reachable here; the long form stays for scripts that already use it.
+PLATFORM_WORDS = {"tg": "telegram", "telegram": "telegram", "dc": "discord", "discord": "discord",
+                  "disc": "discord"}
+AREA_WORDS = ("chat", "web", "mcp", "m") + tuple(PLATFORM_WORDS)
+
+
+def _short_project(args: list[str]) -> tuple[str, list[str]]:
+    """(project, the words left) for a short form: the first word when it names a project, else focus."""
+    if args and args[0] in list_profiles():
+        return args[0], args[1:]
+    focus = active_profile() or load_state().get("last") or DEFAULT_HERMES
+    if not profile_exists(focus):
+        die(f"no project to work on: name one, or create the first with `{PROG} -p <name>`")
+    return focus, args
+
+
+def do_config_short(verb: str, args: list[str], *, dry: bool = False,
+                    assume_yes: bool = False, raw: list[str] | None = None) -> int:
+    project, left = _short_project(args)
+    if verb == "m":
+        return _short_mcp(project, left, dry=dry, assume_yes=assume_yes, raw=raw)
+    area = left[0].lower() if left else ""
+    what = left[1:]
+    if not area:
+        print_config_report(integrations_report(project))
+        return 0
+    platform = PLATFORM_WORDS.get(area, "")
+    if platform or area == "chat":
+        if not platform and what and what[0].lower() in PLATFORM_WORDS:
+            platform = PLATFORM_WORDS[what[0].lower()]
+            what = what[1:]
+        if not platform:
+            die(f"which platform? `{PROG} c {project} tg on` or `{PROG} c {project} dc on`")
+        return _short_chat(project, platform, what, dry=dry, assume_yes=assume_yes)
+    if area == "web":
+        return _short_web(project, what, dry=dry, assume_yes=assume_yes)
+    if area in ("mcp", "m"):
+        return _short_mcp(project, what, dry=dry, assume_yes=assume_yes, raw=raw)
+    die(f"unknown area '{area}': one of {' '.join(AREA_WORDS)} (see `{PROG} -h`)")
+
+
+def _short_chat(project: str, platform: str, what: list[str], *, dry: bool,
+                assume_yes: bool) -> int:
+    if not what:
+        print_config_report(integrations_report(project))
+        return 0
+    enable, token, clear = None, "", False
+    sets: list[tuple[str, str]] = []
+    for word in what:
+        low = word.lower()
+        if low in ("on", "enable"):
+            enable = True
+        elif low in ("off", "disable"):
+            enable = False
+        elif low in ("token", "key"):
+            token = secret_input(f"token for {platform}")
+        elif low.startswith("token="):
+            token = word.split("=", 1)[1]
+        elif low in ("clear", "drop", "rm"):
+            clear = True
+        elif "=" in word:
+            key, _, value = word.partition("=")
+            sets.append((key, value))
+        else:
+            die(f"'{word}' is not a chat setting: on, off, token, token=<v>, clear or key=value "
+                f"(e.g. `{PROG} c {project} {platform} require_mention=no allowed_chats=123`)")
+    config_chat(project, platform, enable=enable, token=token, clear_token=clear, sets=sets,
+                assume_yes=assume_yes, dry=dry)
+    return 0
+
+
+def _short_web(project: str, what: list[str], *, dry: bool, assume_yes: bool) -> int:
+    if not what:
+        print_config_report(integrations_report(project))
+        return 0
+    sets: list[tuple[str, str]] = []
+    key, key_value, unset = "", "", ""
+    i = 0
+    while i < len(what):
+        word = what[i]
+        low = word.lower()
+        if low in ("drop", "unset"):
+            i += 1
+            if i >= len(what):
+                die(f"drop wants a key: `{PROG} c {project} web drop EXA_API_KEY`")
+            unset = what[i]
+        elif "=" in word:
+            name, _, value = word.partition("=")
+            if re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+                key, key_value = name, value          # an .env variable, e.g. EXA_API_KEY=abc123
+            else:
+                sets.append((name, value))            # a `web` setting, e.g. backend=exa
+        elif re.fullmatch(r"[A-Z][A-Z0-9_]*", word):
+            key, key_value = word, secret_input(f"value for {word}")
+        else:
+            die(f"'{word}' is not a web setting: backend=exa, cache_ttl_minutes=30, KEY=value, "
+                f"KEY (asked for) or drop KEY")
+        i += 1
+    config_web(project, sets=sets, key=key, key_value=key_value, unset_key=unset,
+               assume_yes=assume_yes, dry=dry)
+    return 0
+
+
+def _short_mcp(project: str, what: list[str], *, dry: bool, assume_yes: bool,
+               raw: list[str] | None = None) -> int:
+    if not what or what[0].lower() in ("ls", "list"):
+        print_config_report(integrations_report(project))
+        return 0
+    act = {"add": "add", "on": "enable", "enable": "enable", "off": "disable",
+           "disable": "disable", "rm": "rm", "remove": "rm"}.get(what[0].lower())
+    if not act:
+        die(f"add, rm, on, off, or nothing to read (e.g. `{PROG} m {project}`)")
+    if len(what) < 2:
+        die(f"name the server: `{PROG} m {project} {what[0]} <name>`")
+    name, tail = what[1], what[2:]
+    if act == "add" and raw:
+        # everything after the name, exactly as typed (so `npx -y pkg` keeps the -y)
+        try:
+            tail = raw[raw.index(name, raw.index("add") + 1) + 1:]
+        except ValueError:
+            tail = what[2:]
+    if act == "add":
+        if not tail:
+            die(f"give a URL or a command: `{PROG} m {project} add {name} https://host/mcp` "
+                f"or `{PROG} m {project} add {name} npx -y some-server`")
+        first = tail[0]
+        if re.match(r"^https?://", first):
+            config_mcp(project, "add", name, url=first, enable=True, dry=dry)
+        else:
+            config_mcp(project, "add", name, command=first, args=",".join(tail[1:]),
+                       enable=True, dry=dry)
+        return 0
+    config_mcp(project, act, name, assume_yes=assume_yes, dry=dry)
+    return 0
 
 
 def gateway_state(name: str) -> str:
@@ -1698,9 +1888,35 @@ One front door for every Hermes project.
 HERMAN is a wrapper around hermes: every action calls the installed hermes
 command; the engine stays the Hermes you already have.
 
-{bold("ENTER & SELECT")}
+EVERYDAY (short: the project is optional, it defaults to the focus project)
   {PROG}                       dashboard: project list + banner
-  {PROG} <name>                enter a project session (shortcut)
+  {PROG} <name>                enter that project's session
+  {PROG} <name> -q "text"      one-shot question, answer on stdout (cron/scripts)
+  {PROG} <name> -f brief.md    the same, question from a file
+  {PROG} ls                    projects and status
+  {PROG} model [name] [<id>]   show, or switch the model (e.g. {PROG} model claude-opus-4)
+  {PROG} model [name] @<key>   switch model.base_url (@default drops it)
+  {PROG} c [name] tg on|off    chat platform on/off                      (tg, dc)
+  {PROG} c [name] tg token     store the bot token (asked for, never in argv)
+  {PROG} c [name] tg k=v ...   e.g. require_mention=no allowed_chats=123,456
+  {PROG} c [name] web k=v ...  a `web` setting (backend=exa, cache_ttl_minutes=30)
+  {PROG} c [name] web KEY[=v]  a backend key in .env ({PROG} c web EXA_API_KEY)
+  {PROG} c [name] web drop KEY                (type the variable to confirm)
+  {PROG} m [name] add <n> <url|cmd ...>       MCP server: url for http, else a command + args
+  {PROG} m [name] rm|on|off <n>               remove / enable / disable one
+  {PROG} c [name]              what is set, and how to change it (also: {PROG} m [name])
+  {PROG} key <name> VAR[=v]    store an API key in the project's .env
+  {PROG} hist [name] [rm all|rm msg <id>|rm <session-id>|rm <text>]
+  {PROG} usage [name] [--days N]      tokens and cost
+  {PROG} logs [name] [-f]             the project log
+  {PROG} tidy [name|--all]            prune old sessions
+  {PROG} backup [name|--all]          back up to ~/Documents/herman-backup/
+  {PROG} -d [name] [fix]              health check (fix = let the engine repair it)
+  {PROG} sec                          the panel's security battery
+  {PROG} a [name]                     keys, hosts, git credential, connections
+  {PROG} g [name] ...                 git status / identity / remotes
+
+ENTER & SELECT (long spellings, same thing)
   {PROG} -u, --use [name]      enter a session (no name: last used project)
   {PROG} -u <name> -q "text"   one-shot question (cron/scripts)
   {PROG} -u <name> -f brief.md  question from a file
@@ -1780,7 +1996,7 @@ command; the engine stays the Hermes you already have.
   {PROG} access gitcred-rm <host>    forget a stored git credential
   (every revoke/creation asks for confirmation; files are backed up first)
 
-{bold("CONFIGURE (write a setting into one project)")}
+{bold("CONFIGURE (the long spelling of the short forms above)")}
   {PROG} config [name]              what is set for that project, and how to change it
   {PROG} config <name> chat <platform> --enable | --disable
   {PROG} config <name> chat <platform> --token     store the platform token (.env, mode 0600)
@@ -2147,7 +2363,8 @@ def do_cwd(name: str, path: str | None, *, dry: bool = False):
         ok(f"workdir of '{name}' → {target}")
 
 
-def do_doctor(names: list[str], *, dry: bool = False, all_profiles: bool = False):
+def do_doctor(names: list[str], *, dry: bool = False, all_profiles: bool = False,
+              fix: bool = False):
     targets = list_profiles() if all_profiles else names
     if not targets:
         st = load_state().get("last")
@@ -2161,7 +2378,7 @@ def do_doctor(names: list[str], *, dry: bool = False, all_profiles: bool = False
             lines.append(amber("config.yaml missing → run: " + f"hermes -p {name} setup"))
         if st["model"] in ("-", ""):
             lines.append(amber("model not set"))
-        res = run_hermes(["doctor"], name, dry=dry)
+        res = run_hermes(["doctor"] + (["--fix"] if fix else []), name, dry=dry)
         if dry:
             continue
         text = (res.stdout or "") + (res.stderr or "")
@@ -2174,7 +2391,7 @@ def do_doctor(names: list[str], *, dry: bool = False, all_profiles: bool = False
         else:
             color = amber
             lines += ["  " + red(ln.strip()) for ln in bad[:10]]
-            lines.append(dim("auto-fix: " + f"hermes -p {name} doctor --fix"))
+            lines.append(dim("auto-fix: " + f"{PROG} -d {name} fix"))
         print()
         print_frame(f"doctor · {name}  (engine: hermes doctor)", lines, color=color, width=w)
 
@@ -3262,29 +3479,31 @@ def cmd_web(argv: list[str]):
                 "remove": lambda: ["-r", name, "-y"] + tail,
                 "create": lambda: ["-p", name] + flags + tail,
                 "rename": lambda: ["--rename", name, only("new_name")] + tail,
-                "list": lambda: ["-l"] + tail,
+                "list": lambda: ["ls"] + tail,
                 "cwd": lambda: ["-C", name] + ([cwd] if cwd else []) + tail,
                 "model": lambda: ["model", name] + tail,
-                "model-set": lambda: (["model", name, "--set", only("model")] + tail),
-                "model-set-endpoint": lambda: (["model", name, "--endpoint", only("target")]
+                # the short spellings the help shows: a bare model id switches the model, @<key|url>
+                # switches model.base_url
+                "model-set": lambda: (["model", name, only("model")] + tail),
+                "model-set-endpoint": lambda: (["model", name, "@" + only("target")]
                                                + (["--provider", only("provider")]
                                                   if only("provider") else []) + tail),
                 "model-probe": lambda: (["model", name, "--probe", only("target")] + tail),
-                "git": lambda: ["git", name] + tail,
-                "access": lambda: ["access", name] + tail,
+                "git": lambda: ["g", name] + tail,
+                "access": lambda: ["a", name] + tail,
                 "sync": lambda: ["sync", "--fix"] + tail,
                 "kill": lambda: ["kill", name, "-y"] + tail,
                 "kill-session": lambda: ["kill", name, "--session", only("session"), "-y"] + tail,
-                "history-stats": lambda: ["history", name, "--stats"] + tail,
-                "history-delete-message": lambda: ["history", name, "--delete-message", only("id"), "-y"] + tail,
-                "history-delete-session": lambda: ["history", name, "--delete-session", only("session"), "-y"] + tail,
-                "history-delete-matching": lambda: ["history", name, "--delete-matching", only("q"), "-y"] + tail,
-                "history-delete-all": lambda: ["history", name, "--delete-all", "-y"] + tail,
+                "history-stats": lambda: ["hist", name] + tail,
+                "history-delete-message": lambda: ["hist", name, "rm", "msg", only("id"), "-y"] + tail,
+                "history-delete-session": lambda: ["hist", name, "rm", only("session"), "-y"] + tail,
+                "history-delete-matching": lambda: ["hist", name, "rm", only("q"), "-y"] + tail,
+                "history-delete-all": lambda: ["hist", name, "rm", "all", "-y"] + tail,
                 "access-revoke-agent": lambda: ["access", "revoke-agent", only("key")] + tail,
                 "access-revoke-key": lambda: ["access", "revoke-key", only("key"), "-y"] + tail,
                 "access-unset-env": lambda: ["access", "unset-env", name, only("var")] + tail,
                 "access-new-key": lambda: ["access", "new-key", only("label"), "-y"] + tail,
-                "access-set-env": lambda: ["access", "set-env", name, only("var")] + tail,
+                "access-set-env": lambda: ["key", name, only("var")] + tail,
                 "access-gitcred-add": lambda: ["access", "gitcred-add", only("host"), only("user")] + tail,
                 "access-gitcred-rm": lambda: ["access", "gitcred-rm", only("host"), "-y"] + tail,
                 "git-init": lambda: ["git", name, "init"] + tail,
@@ -3298,35 +3517,9 @@ def cmd_web(argv: list[str]):
                 # The configure board writes one setting per call, into the focus project's own
                 # config.yaml / .env. The panel never edits a file itself: it builds the same
                 # `herman config` command a person would type, and the CLI does the writing.
-                "config": lambda: (["config", name] if name else ["config"]) + tail,
-                "config-set": lambda: (["config", name, only("area")]
-                                       + ([only("subject")] if only("area") == "chat"
-                                          and only("subject") else [])
-                                       + ([only("sub")] if only("area") == "mcp"
-                                          and only("sub") else [])
-                                       + ([only("subject")] if only("area") == "mcp"
-                                          and only("subject") else [])
-                                       + (["--enable"] if only("state") == "on"
-                                          else (["--disable"] if only("state") == "off" else []))
-                                       + (["--set", only("set")] if only("set") else [])
-                                       + (["--token"] if only("area") == "chat"
-                                          and ("token" in q or "value" in q) else [])
-                                       + (["--key", only("var")] if only("area") == "web"
-                                          and only("var") else [])
-                                       + (["--url", only("mcp_url")] if only("mcp_url") else [])
-                                       + (["--command", only("mcp_command")] if only("mcp_command") else [])
-                                       + (["--args", only("mcp_args")] if only("mcp_args") else [])
-                                       + tail),
-                "config-remove": lambda: (["config", name, only("area")]
-                                          + ([only("sub")] if only("area") == "mcp"
-                                             and only("sub") else [])
-                                          + ([only("subject")] if only("area") == "mcp"
-                                             and only("subject") else [])
-                                          + ([only("subject")] if only("area") == "chat"
-                                             and only("subject") else [])
-                                          + (["--clear-token"] if only("area") == "chat" else [])
-                                          + (["--unset-key", only("var")] if only("var") else [])
-                                          + ["-y"] + tail),
+                "config": lambda: (["c", name] if name else ["c"]) + tail,
+                "config-set": lambda: panel_config_argv(name, q) + tail,
+                "config-remove": lambda: panel_config_argv(name, q, remove=True) + tail,
             }
             # Secrets (API keys, tokens) reach the CLI through HERMAN_SECRET, never argv.
             secret_actions = ("access-set-env", "access-gitcred-add", "config-set")
@@ -7486,6 +7679,31 @@ def main(argv: list[str]) -> int:
         do_home()
         return 0
 
+    # One word instead of a flag, or a shorter spelling of a verb. herman exists to make the everyday
+    # command shorter than the engine's own, so the long spellings keep working while these do the
+    # same job: `usage X` == `--usage X`, `logs X` == `--logs X`, `tidy` == `--tidy`,
+    # `backup X` == `-b X`, `hist` == `history`, `a` == `access`, `g` == `git`, `sec` == `security`,
+    # `ls` == `-l`.
+    VERB_ALIASES = {"hist": "history", "a": "access", "g": "git", "sec": "security"}
+    WORD_FOR_FLAG = {"usage", "logs", "tidy", "backup", "audit", "unused", "describe", "summary"}
+    head = rest[0]
+    if head in VERB_ALIASES:
+        rest[0] = head = VERB_ALIASES[head]
+    elif head in WORD_FOR_FLAG:
+        rest[0] = head = "--" + head
+    elif head == "ls":
+        rest[0] = head = "-l"
+    elif head == "key":
+        args = rest[1:]
+        if not args:
+            die(f"usage: {PROG} key [project] <VAR>[=<value>]   (also: {PROG} access set-env)")
+        project, args = _short_project(args)
+        var, _, inline = args[0].partition("=")
+        if not var:
+            die(f"usage: {PROG} key {project} <VAR>[=<value>]")
+        access_set_env(project, var, inline or secret_input(f"value for {var}"), dry=dry)
+        return 0
+
     def val(flag: str, default=None):
         """Value of a flag. Missing value or another flag ⇒ default (callers decide)."""
         if flag in rest:
@@ -7560,6 +7778,27 @@ def main(argv: list[str]) -> int:
         dry = dry or ("--dry" in rest)          # accept both spellings here
         nm = args[0] if args and args[0] in list_profiles() else None
         nm = nm or active_profile() or load_state().get("last") or DEFAULT_HERMES
+        # `herman hist X rm <target>`: `rm all`, `rm msg <id>`, `rm <session-id>`, or `rm <text>` for
+        # every session matching a search. Decided by shape, so the operator does not have to pick a
+        # different flag per case; the flags stay for scripts.
+        after = [a for a in (args[1:] if nm in args else args) if not a.startswith("-")]
+        if after and after[0] in ("rm", "del", "delete"):
+            target = after[1] if len(after) > 1 else "all"
+            if target in ("all", "history"):
+                do_history(nm, stats_only=False, everything=True, assume_yes=assume_yes, dry=dry,
+                           as_json=as_json)
+                return 0
+            if target in ("msg", "message") and len(after) > 2:
+                do_history(nm, stats_only=False, message=after[2], assume_yes=assume_yes, dry=dry,
+                           as_json=as_json)
+                return 0
+            if re.fullmatch(r"20\d{6}_\d{6}_[0-9a-f]{4,}", target):
+                do_history(nm, stats_only=False, session=target, assume_yes=assume_yes, dry=dry,
+                           as_json=as_json)
+                return 0
+            do_history(nm, stats_only=False, matching=target, assume_yes=assume_yes, dry=dry,
+                       as_json=as_json)
+            return 0
         try:
             mid = int(val("--delete-message", "0") or 0)
         except TypeError:
@@ -7584,6 +7823,26 @@ def main(argv: list[str]) -> int:
     if cmd == "model":
         nm = rest[1] if len(rest) > 1 and not rest[1].startswith("-") else None
         nm = nm or active_profile() or load_state().get("last") or DEFAULT_HERMES
+        # Short form: `herman model X <id>` switches the model, `herman model X @<key|url>` switches
+        # model.base_url, and an extra bare word after either is the provider. Nothing to remember with
+        # flags for the two things people do most; the flags stay for scripts.
+        bare = [a for a in rest[2:] if not a.startswith("-")] if nm else []
+        if bare and not has("--set", "--endpoint", "--base-url", "--list", "--endpoints", "--probe"):
+            first = bare[0]
+            if first.startswith("@"):
+                target = first[1:] or "default"
+                provider = bare[1] if len(bare) > 1 else None
+                do_model(nm, provider=provider, endpoint=target, dry=dry)
+                return 0
+            if first in ("ls", "list"):
+                do_model(nm, list_models=True, refresh=has("--refresh"), dry=dry)
+                return 0
+            if first in ("urls", "endpoints"):
+                do_model(nm, list_endpoints=True, dry=dry)
+                return 0
+            provider = bare[1] if len(bare) > 1 else None
+            do_model(nm, set_model=first, provider=provider, dry=dry)
+            return 0
         # --endpoint/--probe take a value that may be absent on purpose (a bare `--probe` tests the
         # endpoint already configured), so the flag and its value are read separately: val() answers
         # the default whenever the next token is another flag, which would look like "no flag".
@@ -7632,10 +7891,19 @@ def main(argv: list[str]) -> int:
         do_git(nm, None, dry=dry)
         return 0
 
-    if cmd in ("config", "configure", "cfg"):
+    if cmd in ("config", "configure", "cfg", "c", "m"):
         args = rest[1:]
         sub = args[0] if args and not args[0].startswith("-") else ""
         area = args[1] if len(args) > 1 and not args[1].startswith("-") else ""
+        # Two grammars share this verb. The short one is what the help leads with and what the panel
+        # sends: `herman c [project] <area> <what...>` and `herman m [project] <add|rm|on|off> <name>`.
+        # The long one (`config <project> chat <platform> --enable`) stays for scripts written against
+        # it. A `--flag` anywhere means the caller wants the long form.
+        long_form = any(a.startswith("--") for a in args) or cmd in ("config", "configure", "cfg")
+        if not long_form:
+            # `raw` is argv as typed: herman's own global flags (-y, --json, ...) are stripped from
+            # `rest`, and a command line like `npx -y pkg` must not lose its `-y` to that stripping.
+            return do_config_short(cmd, args, dry=dry, assume_yes=assume_yes, raw=argv)
         if not sub or not area:
             # `herman config` reads the active project, `herman config <project>` reads that one:
             # the moment a second word arrives ("chat", "web", "mcp") it is a write, not a read.
@@ -7810,9 +8078,10 @@ def main(argv: list[str]) -> int:
         do_audit(val("--audit") or (rest[1] if len(rest) > 1 and not rest[1].startswith("-") else None))
         return 0
     if has("--logs"):
-        name = val("--logs") or (rest[1] if len(rest) > 1 and not rest[1].startswith("-") else None)
+        name = (val("--logs") or (rest[1] if len(rest) > 1 and not rest[1].startswith("-") else None)
+                or active_profile() or load_state().get("last"))
         if not name:
-            die("name a project: " + f"{PROG} --logs <name>")
+            die("name a project: " + f"{PROG} logs <name>")
         do_logs(name, follow=has("-f", "--follow"), lines=int(val("-n", 40) or 40), dry=dry)
         return 0
     if has("--tidy"):
@@ -7904,7 +8173,11 @@ def main(argv: list[str]) -> int:
         return 0
     if has("-d", "--doctor"):
         name = None if has("--all") else (val("-d") or val("--doctor"))
-        do_doctor([name] if name else [], dry=dry, all_profiles=has("--all") or not name)
+        # `herman -d X fix` (or --fix) hands the engine its own repair switch: the engine does the
+        # fixing, herman only says the shorter word.
+        fix = has("--fix", "fix")
+        do_doctor([name] if name else [], dry=dry, all_profiles=has("--all") or not name,
+                  fix=fix)
         return 0
     if has("-b", "--backup"):
         name = val("-b") or val("--backup")

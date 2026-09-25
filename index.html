@@ -1008,7 +1008,7 @@
               <label class="f" for="mcp-args">command arguments</label>
               <input id="mcp-args" placeholder="-y,server-fetch" autocomplete="off">
             </div>
-            <button class="primary" onclick="mcpAdd()" title="herman config &lt;project&gt; mcp add &lt;server&gt; — one of endpoint or command, exactly as the CLI asks.">Add server</button>
+            <button class="primary" onclick="mcpAdd()" title="herman m &lt;project&gt; add &lt;server&gt; &lt;url|command&gt; — one of the two, exactly as the CLI asks.">Add server</button>
           </div>
         </div>
 
@@ -1172,7 +1172,7 @@
                 <label class="f" for="chat-value">value</label>
                 <input id="chat-value" placeholder="true / false / 123,456" autocomplete="off">
               </div>
-              <button class="primary" onclick="chatSaveKey()" title="herman config &lt;project&gt; chat &lt;platform&gt; --set key=value">Save chat setting</button>
+              <button class="primary" onclick="chatSaveKey()" title="herman c &lt;project&gt; &lt;tg|dc&gt; key=value">Save chat setting</button>
             </div>
 
             <div class="subhead">Web search &amp; extract backends</div>
@@ -1187,13 +1187,13 @@
                 <label class="f" for="web-value">value</label>
                 <input id="web-value" placeholder="an exa key, a searxng url, 30" autocomplete="off">
               </div>
-              <button onclick="webSaveSetting()" title="herman config &lt;project&gt; web --set key=value; a provider key goes to .env instead.">Save backend setting</button>
+              <button onclick="webSaveSetting()" title="herman c &lt;project&gt; web key=value; a provider key goes to .env instead.">Save backend setting</button>
               <div>
                 <label class="f" for="web-provider">or a backend key</label>
                 <select id="web-provider" onchange="webFormFill()"></select>
               </div>
-              <button class="primary" onclick="webSaveKey()" title="herman config &lt;project&gt; web --key VAR; the value is POSTed, written 0600 and never echoed back.">Save key</button>
-              <button class="ghost danger" onclick="webUnsetKey()" title="herman config &lt;project&gt; web --unset-key VAR; asks you to type the variable name first.">Drop key</button>
+              <button class="primary" onclick="webSaveKey()" title="herman c &lt;project&gt; web VAR; the value is POSTed, written 0600 and never echoed back.">Save key</button>
+              <button class="ghost danger" onclick="webUnsetKey()" title="herman c &lt;project&gt; web drop VAR; asks you to type the variable name first.">Drop key</button>
             </div>
             <p class="hint" id="acc-integ-hint"></p>
           </div>
@@ -2577,9 +2577,9 @@ function renderIntegrations(d){
       stateCell(s.enabled === 'true', s.enabled === 'true' ? 'enabled' : 'disabled'),
       btnCell([
         btn(s.enabled === 'true' ? 'Disable' : 'Enable', 'ghost', () => mcpToggle(s.name, s.enabled !== 'true'),
-            'herman config <project> mcp ' + (s.enabled === 'true' ? 'disable' : 'enable') + ' ' + s.name),
+            'herman m <project> ' + (s.enabled === 'true' ? 'off' : 'on') + ' ' + s.name),
         btn('Remove', 'ghost danger', () => mcpRemove(s.name),
-            'herman config <project> mcp rm ' + s.name + ' (type the name to confirm)'),
+            'herman m <project> rm ' + s.name + ' (type the name to confirm)'),
       ]),
     ]),
     'Nothing in mcp_servers for project "' + d.project + '" · write one below.');
@@ -2604,9 +2604,9 @@ function renderIntegrations(d){
     wrap.className = 'btnrow';
     wrap.append(input,
       btn('Save', 'primary', () => chatTokenSave(c.platform, input),
-          'herman config <project> chat ' + c.platform + ' --token'),
+          'herman c <project> ' + c.platform + ' token'),
       btn('Drop', 'ghost danger', () => chatTokenDrop(c.platform),
-          'herman config <project> chat ' + c.platform + ' --clear-token (type the variable name)'));
+          'herman c <project> ' + c.platform + ' clear (type the variable name)'));
     return {node: wrap};
   }
   table('acc-chat-table', ['Platform', 'State', 'Bot token in this project .env', 'Config keys', 'Switch'],
@@ -2618,7 +2618,7 @@ function renderIntegrations(d){
       btnCell([
         btn(c.enabled ? 'Disable' : 'Enable', c.enabled ? 'ghost' : 'primary',
             () => chatToggle(c.platform, !c.enabled),
-            'herman config <project> chat ' + c.platform + (c.enabled ? ' --disable' : ' --enable')),
+            'herman c <project> ' + c.platform + (c.enabled ? ' off' : ' on')),
       ]),
     ]),
     'No chat platform is configured for this project.');
