@@ -251,6 +251,18 @@ def main() -> int:
         record((backup.stat().st_mode & 0o777) == 0o600, f"{backup.name} is 0600",
                oct(backup.stat().st_mode & 0o777))
 
+    # ---- the panel's own JavaScript -----------------------------------------------------------
+    # A syntax error in any branch takes the whole module down: every route keeps answering and the
+    # page renders nothing, which is exactly what "the panel is empty" looks like. Only a parser
+    # catches it, so it is part of this battery.
+    js_check = SHARE / "panel-syntax-check.sh"
+    if js_check.exists():
+        res = subprocess.run(["bash", str(js_check)], capture_output=True, text=True)
+        record(res.returncode == 0, "the panel's JavaScript parses (node --check)",
+               (res.stdout + res.stderr).strip()[-300:])
+    else:
+        record(False, "the panel's JavaScript parses (node --check)", f"{js_check} is missing")
+
     # ---- publishable files -------------------------------------------------------------------
     pre = SHARE / "preflight.py"
     if pre.exists():

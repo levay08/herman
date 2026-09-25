@@ -249,6 +249,11 @@ any other operator data) cannot reach your history by accident. It also refuses 
 projects (matched on word boundaries), so a log line, an example or a screenshot caption cannot hand
 out the shape of your machine.
 
+Next to it, `panel-syntax-check.sh` parses the panel's JavaScript with `node --check`. That check is
+not cosmetic: a syntax error in one branch takes the whole script down, and the page then renders
+nothing at all while every API route keeps answering, so the panel looks empty and the server looks
+healthy. `herman security` runs it as one of its checks.
+
 Images are the one thing a text scanner cannot read: `preflight.py` says so rather than reporting
 them clean, so look at every screenshot before a release and take it from a throwaway HOME
 (`env -u HERMES_HOME HOME=/tmp/shots herman web --port 9123`), where no real project name, path or

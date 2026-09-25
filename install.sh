@@ -21,6 +21,7 @@ install -m 0644 "$SRC/icons.svg" "$SHARE/icons.svg"
 install -m 0644 "$SRC/icons.LICENSE.txt" "$SHARE/icons.LICENSE.txt"
 install -m 0644 "$SRC/security_check.py" "$SHARE/security_check.py"
 install -m 0644 "$SRC/preflight.py" "$SHARE/preflight.py"
+install -m 0755 "$SRC/panel-syntax-check.sh" "$SHARE/panel-syntax-check.sh"
 install -m 0644 "$SRC/completions/herman" "$COMP/herman"
 if [ -f "$SRC/caduceus.png" ]; then
     install -m 0644 "$SRC/caduceus.png" "$SHARE/caduceus.png"

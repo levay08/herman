@@ -1962,8 +1962,8 @@ function renderMemory(){
   if (d.error) setHint('memory-note', 'the engine said: ' + d.error);
   else setHint('memory-note', 'Every session of ' + d.project + ' gets MEMORY.md and USER.md injected, against'
     + ' a budget of ' + d.memory_limit + ' and ' + d.user_limit + ' characters'
-    + (d.limits_from_config ? ' set in this project's config.yaml' : ' (the engine's defaults)')
-    + '. Sizes are the files on disk, read by herman; the provider list below is the engine's own'
+    + (d.limits_from_config ? " set in this project's config.yaml" : " (the engine's defaults)")
+    + ". Sizes are the files on disk, read by herman; the provider list below is the engine's own"
     + ' (`hermes -p ' + d.project + ' memory status`).');
   table('memory-table', ['File', 'On disk', 'Budget', 'Used'], [
     ['MEMORY.md', humanBytes(d.memory_bytes), d.memory_limit, memoryPct(d.memory_bytes, d.memory_limit)],
