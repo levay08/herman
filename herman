@@ -700,7 +700,12 @@ def integrations_report(name: str) -> dict:
     webblock = _yaml_block(cfg, "web") if cfg.exists() else {}
     web = {
         "keys": [{"key": k, "value": str(webblock.get(k, "")) or "(default)"} for k in web_keys],
-        "providers": [{"name": p, "env": e or "-", "env_set": e in env_names if e else False, "note": n}
+        # `active` and `env_kind` exist so the board can render one row per backend that is correct on
+        # its own: which one this project uses, and whether its variable holds a secret or a URL.
+        "providers": [{"name": p, "env": e or "-", "env_set": e in env_names if e else False,
+                       "env_kind": ("url" if e.endswith("_URL") else "secret") if e else "",
+                       "active": str(webblock.get("backend", "")).strip().lower() == p,
+                       "note": n}
                       for p, e, n in WEB_PROVIDERS],
         "enable_hint": "hermes tools   (the official picker)   or   hermes config set web.backend <name>",
     }

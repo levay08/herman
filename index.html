@@ -202,6 +202,16 @@
   .logo-tagline a:hover{text-decoration:underline}
   .hero-meta{display:flex;flex-direction:column;gap:10px;max-width:330px}
   .hint{font-size:12.3px;color:var(--dim)}
+  /* One setting, one line, inside its own table cell. The shared input rule is width:100%, and in a
+     wrapping flex row (.btnrow) that pushed every Save button onto the line below: the chat rows came
+     out three times taller than they needed to be and the labels stopped lining up with their inputs. */
+  .inrow{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}
+  .inrow input{flex:1 1 auto;min-width:104px;width:auto;font-size:12.6px;min-height:26px;padding:3px 7px}
+  /* The name sizes itself: a fixed width cut "free_response_channels" into an ellipsis, and these are
+     the only labels the operator has to match against config.yaml. */
+  .inrow .keyname{flex:0 0 auto;white-space:nowrap;font-family:var(--mono);font-size:11.6px;
+    color:var(--dim2)}
+  #acc-chat-table td,#acc-web-table td,#acc-web-settings-table td{vertical-align:middle}
   .note{font-size:12.7px;color:var(--dim);line-height:1.55;margin:0 0 var(--s3)}
   .sec-title{font-size:14px;font-weight:650;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .subhead{font-size:11.3px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
@@ -1203,43 +1213,22 @@
           <div class="card pad">
             <p class="hint">what this project could connect to, and what it already has. Every write here goes to this project's own <code>config.yaml</code> or <code>.env</code> (0600, backed up first) through <code>herman config</code>; herman never contacts a provider.</p>
             <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Chat platforms</div>
+            <p class="hint">Token and settings live in the platform's own row: paste the token where it
+              says so, type a new value next to the setting it belongs to, and the switch turns the platform
+              on or off (<code>enabled</code>).</p>
             <div class="scrollx"><table id="acc-chat-table"></table></div>
-            <div class="row">
-              <div>
-                <label class="f" for="chat-platform">platform whose settings you are editing</label>
-                <select id="chat-platform" onchange="chatFormFill()"></select>
-              </div>
-              <div>
-                <label class="f" for="chat-key">setting</label>
-                <select id="chat-key" onchange="chatFormFill()"></select>
-              </div>
-              <div>
-                <label class="f" for="chat-value">value</label>
-                <input id="chat-value" placeholder="true / false / 123,456" autocomplete="off">
-              </div>
-              <button class="primary" onclick="chatSaveKey()" title="herman c &lt;project&gt; &lt;tg|dc&gt; key=value">Save chat setting</button>
-            </div>
 
             <div class="subhead">Web search &amp; extract backends</div>
-            <div class="kv" id="acc-web-kv"></div>
+            <p class="hint">One row per backend the engine knows. <b>Use this backend</b> writes
+              <code>web.backend</code>; a key or a URL is pasted into the row that needs it and lands in this
+              project's <code>.env</code> (0600, backed up first). A backend marked <i>no key needed</i> works
+              as it is.</p>
             <div class="scrollx"><table id="acc-web-table"></table></div>
-            <div class="row">
-              <div>
-                <label class="f" for="web-key">setting</label>
-                <select id="web-key" onchange="webFormFill()"></select>
-              </div>
-              <div>
-                <label class="f" for="web-value">value</label>
-                <input id="web-value" placeholder="an exa key, a searxng url, 30" autocomplete="off">
-              </div>
-              <button onclick="webSaveSetting()" title="herman c &lt;project&gt; web key=value; a provider key goes to .env instead.">Save backend setting</button>
-              <div>
-                <label class="f" for="web-provider">or a backend key</label>
-                <select id="web-provider" onchange="webFormFill()"></select>
-              </div>
-              <button class="primary" onclick="webSaveKey()" title="herman c &lt;project&gt; web VAR; the value is POSTed, written 0600 and never echoed back.">Save key</button>
-              <button class="ghost danger" onclick="webUnsetKey()" title="herman c &lt;project&gt; web drop VAR; asks you to type the variable name first.">Drop key</button>
-            </div>
+
+            <div class="subhead">Other <code>web</code> settings</div>
+            <p class="hint">Each row is written on its own, straight into <code>config.yaml</code>; leave a box
+              empty and nothing changes there.</p>
+            <div class="scrollx"><table id="acc-web-settings-table"></table></div>
             <p class="hint" id="acc-integ-hint"></p>
           </div>
         </div>
@@ -1608,9 +1597,11 @@ const ROUTE_LOAD = {
   projects: () => refresh(),
   model: () => { loadFocus(); loadUsage(); },
   insights: () => { loadInsights(); loadUsage(); },
-  access: () => { loadFocus(); loadIntegrations(); },
+  // loadFocus() is what resolves the focus project, so the integration lists must wait for it: run
+  // them side by side and the panes report "waiting for the project list" and stay empty.
+  access: () => loadIntegrationsWhenReady(),
   maintenance: () => refreshAll(),
-  mcp: () => { loadFocus(); loadIntegrations(); }
+  mcp: () => loadIntegrationsWhenReady()
 };
 function navigate(route){
   const r = TITLES[route] ? route : 'dashboard';
@@ -2597,18 +2588,36 @@ function accessView(a){
    the command instead, so the operator (or the user of the published app) makes that call. */
 async function loadIntegrations(){
   if (!focusProject){
-    kv('acc-web-kv', [['status', 'waiting for the project list…']]);
+    setHint('acc-integ-hint', 'waiting for the project list…');
     return;
   }
   let d;
   try {
     d = await (await fetch(`/api/integrations?t=${TOKEN}&name=${encodeURIComponent(focusProject)}`)).json();
   } catch (e) {
-    setHint('mcp-note', 'could not read the option list: ' + e);
+    setHint('acc-integ-hint', 'could not read the option list: ' + e);
     return;
   }
-  if (d.error){ setHint('mcp-note', d.error); return; }
-  renderIntegrations(d);
+  if (d.error){ setHint('acc-integ-hint', d.error); return; }
+  /* Rendering inside the guard on purpose: a throw here used to leave the pane with the previous
+     state (or the "waiting for the project list" line) and look like an empty board rather than a
+     broken one. */
+  try {
+    renderIntegrations(d);
+  } catch (e) {
+    setHint('acc-integ-hint', 'the option list came back but could not be drawn: ' + e);
+  }
+}
+/* The board needs the focus project, and that comes from its own request: run the two side by side and
+   the lists render against an empty name (which is what "waiting for the project list" was), so this
+   waits for the focus to resolve and retries once before giving up. */
+async function loadIntegrationsWhenReady(){
+  for (let attempt = 0; attempt < 3; attempt++){
+    await loadFocus();
+    if (focusProject) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  await loadIntegrations();
 }
 function stateCell(on, label){
   const wrap = document.createElement('span');
@@ -2698,7 +2707,7 @@ function mcpRemove(name){
             'Remove MCP server "' + name + '" from this project\'s config.yaml?');
 }
 function chatToggle(platform, on){
-  const target = platform || selVal('chat-platform');
+  const target = platform;
   if (!target) return;
   cfgSet({area: 'chat', subject: target, state: on ? 'on' : 'off'});
 }
@@ -2715,64 +2724,41 @@ function chatTokenDrop(platform){
             'Drop ' + cur.secret + ' from this project\'s .env? The platform stays configured but '
             + 'cannot authenticate until a new token is saved.');
 }
-function chatSaveKey(){
-  const platform = selVal('chat-platform');
-  const key = selVal('chat-key');
-  const value = v('chat-value').trim();
+function chatSetKey(platform, key, input){
   const cur = chatOne(platform);
   if (!cur || !cur.keys.some(k => k.key === key)){
-    setStatus('error', 'Pick one of the settings this platform has.');
+    setStatus('error', 'That is not a setting this platform has.');
     return;
   }
-  if (!value){ setStatus('error', 'The setting needs a value.'); return; }
+  const value = (input && input.value || '').trim();
+  if (!value){ setStatus('error', 'Type a value for ' + key + ' first.'); return; }
   cfgSet({area: 'chat', subject: platform, set: key + '=' + value});
+  if (input) input.value = '';
 }
-function webSaveSetting(){
-  const key = selVal('web-key');
-  const value = v('web-value').trim();
-  if (!key){ setStatus('error', 'Pick a setting first.'); return; }
-  if (!value){ setStatus('error', 'The setting needs a value.'); return; }
-  cfgSet({area: 'web', set: key + '=' + value});
+/* The web backends are three different things, so they get three different controls, each inside the
+   row it belongs to: which backend is in use (a button that writes web.backend), the key or URL that
+   backend reads (an input next to its own name), and the other web.* settings, each written from its
+   own row. A dropdown that only moved a value into a form below the fold is what made this board
+   unreadable. */
+function webUseBackend(name){
+  setStatus('busy', 'switching the backend to ' + name + '…');
+  cfgSet({area: 'web', set: 'backend=' + name});
 }
-function webSaveKey(){
-  const env = selVal('web-provider');
-  const value = v('web-value');
-  if (!env){ setStatus('error', 'Pick a backend key first.'); return; }
-  if (!value){ setStatus('error', 'Paste the key first.'); return; }
+function webSaveKey(env, input){
+  const value = (input && input.value || '').trim();
+  if (!value){ setStatus('error', 'Paste the value for ' + env + ' first.'); return; }
   cfgSet({area: 'web', var: env, value: value});
-  const el = document.getElementById('web-value');
-  if (el) el.value = '';
+  if (input) input.value = '';
 }
-function webUnsetKey(){
-  const env = selVal('web-provider');
-  if (!env){ setStatus('error', 'Pick a backend key first.'); return; }
+function webUnsetKey(env){
   cfgRemove({area: 'web', var: env}, env,
             'Drop ' + env + ' from this project\'s .env?');
 }
-function chatFormFill(){
-  const cur = chatOne(selVal('chat-platform'));
-  if (!cur) return;
-  const keyEl = document.getElementById('chat-key');
-  if (keyEl){
-    const keep = keyEl.value;
-    keyEl.textContent = '';
-    cur.keys.forEach(k => {
-      const o = document.createElement('option');
-      o.value = k.key;
-      o.textContent = k.key;
-      keyEl.appendChild(o);
-    });
-    if (cur.keys.some(k => k.key === keep)) keyEl.value = keep;
-  }
-  const val = document.getElementById('chat-value');
-  const chosen = cur.keys.find(k => k.key === selVal('chat-key'));
-  if (val && chosen) val.placeholder = chosen.value === '-' ? '(unset)' : chosen.value;
-}
-function webFormFill(){
-  const w = webList();
-  const chosen = w.keys.find(k => k.key === selVal('web-key'));
-  const val = document.getElementById('web-value');
-  if (val && chosen) val.placeholder = chosen.value === '(default)' ? '(default)' : chosen.value;
+function webSaveSettingRow(key, input){
+  const value = (input && input.value || '').trim();
+  if (!value){ setStatus('error', 'Type a value for web.' + key + ' first.'); return; }
+  cfgSet({area: 'web', set: key + '=' + value});
+  if (input) input.value = '';
 }
 function renderIntegrations(d){
   integ = d;
@@ -2810,7 +2796,7 @@ function renderIntegrations(d){
     input.placeholder = c.secret_set ? 'stored · paste to replace' : 'paste the bot token';
     input.title = 'Value for ' + c.secret + '; sent as POST and written to .env with mode 0600.';
     const wrap = document.createElement('span');
-    wrap.className = 'btnrow';
+    wrap.className = 'inrow';
     wrap.append(input,
       btn('Save', 'primary', () => chatTokenSave(c.platform, input),
           'herman c <project> ' + c.platform + ' token'),
@@ -2818,12 +2804,37 @@ function renderIntegrations(d){
           'herman c <project> ' + c.platform + ' clear (type the variable name)'));
     return {node: wrap};
   }
-  table('acc-chat-table', ['Platform', 'State', 'Bot token in this project .env', 'Config keys', 'Switch'],
+  /* The settings of a platform are edited in that platform's own row: the same rule as the web
+     backends, and it replaces the platform/setting/value dropdowns that used to sit below the table
+     and only moved a value into a form. `enabled` is not listed here: the Switch column owns it. */
+  function chatKeysCell(c){
+    const box = document.createElement('div');
+    const on = c.enabled ? 'off' : 'on';
+    c.keys.filter(k => k.key !== 'enabled').forEach(k => {
+      const line = document.createElement('div');
+      line.className = 'inrow';
+      const label = document.createElement('span');
+      label.className = 'keyname';
+      label.textContent = k.key;
+      const input = document.createElement('input');
+      input.autocomplete = 'off';
+      input.placeholder = (k.value === '-' ? '(unset)' : k.value);
+      if (k.value !== '-') input.value = k.value;
+      input.title = 'New value for ' + c.platform + '.' + k.key + '; sent as POST and written into this'
+        + ' project\'s config.yaml after a backup.';
+      line.append(label, input,
+        btn('Save', 'primary', () => chatSetKey(c.platform, k.key, input),
+            'herman c <project> ' + (c.platform === 'telegram' ? 'tg' : 'dc') + ' ' + k.key + '=<value>'));
+      box.append(line);
+    });
+    return {node: box};
+  }
+  table('acc-chat-table', ['Platform', 'State', 'Bot token in this project .env', 'Settings in config.yaml', 'Switch'],
     (d.chat || []).map(c => [
       c.label,
       stateCell(c.enabled, c.enabled ? 'enabled' : (c.configured ? 'configured, disabled' : 'not configured')),
       chatTokenCell(c),
-      c.keys.map(k => k.key + '=' + k.value).join('  '),
+      chatKeysCell(c),
       btnCell([
         btn(c.enabled ? 'Disable' : 'Enable', c.enabled ? 'ghost' : 'primary',
             () => chatToggle(c.platform, !c.enabled),
@@ -2833,24 +2844,61 @@ function renderIntegrations(d){
     'No chat platform is configured for this project.');
 
   const w = d.web || { keys: [], providers: [] };
-  kv('acc-web-kv', (w.keys || []).map(k => [k.key, k.value]));
-  table('acc-web-table', ['Backend', 'Key / env var', 'In .env', 'Note'],
-    (w.providers || []).map(p => [
-      p.name, p.env, stateCell(p.env_set, p.env_set ? 'set' : 'not set'), p.note]),
+  function webKeyCell(p){
+    if (!p.env || p.env === '-') return 'no key needed';
+    const isUrl = p.env_kind === 'url';
+    const input = document.createElement('input');
+    input.type = isUrl ? 'text' : 'password';
+    input.autocomplete = 'new-password';
+    input.placeholder = p.env_set ? 'stored · paste to replace'
+      : (isUrl ? 'https://your-searxng.example/search' : 'paste the key');
+    input.title = 'Value for ' + p.env + '; sent as POST, written to this project\'s .env with mode 0600,'
+      + ' and never echoed back.';
+    const wrap = document.createElement('span');
+    wrap.className = 'inrow';
+    wrap.append(input,
+      btn('Save', 'primary', () => webSaveKey(p.env, input),
+          'herman c <project> web ' + p.env + '  (' + (isUrl ? 'a URL in .env' : 'the key in .env') + ')'));
+    if (p.env_set){
+      wrap.append(btn('Drop', 'ghost danger', () => webUnsetKey(p.env),
+                      'herman c <project> web drop ' + p.env + ' (type the variable name)'));
+    }
+    return {node: wrap};
+  }
+  /* No {node: ...} wrapper here: stateCell() already returns a cell descriptor, and wrapping it again
+     handed table() an object where it wanted a Node (the active backend row broke the whole pane). */
+  function webUseCell(p){
+    if (p.active) return stateCell(true, 'in use');
+    return {node: btn('Use this backend', 'ghost', () => webUseBackend(p.name),
+                      'herman c <project> web backend=' + p.name + '  (writes web.backend in config.yaml)')};
+  }
+  table('acc-web-table', ['Backend', 'What it is', 'Key or URL for this backend', 'In use'],
+    (w.providers || []).map(p => [p.name, p.note, webKeyCell(p), webUseCell(p)]),
     'backend list unavailable');
 
-  fillSelect('chat-platform', (d.chat || []).map(c => [c.platform, c.label]),
-             selVal('chat-platform') || (d.chat || [])[0]?.platform || '');
-  chatFormFill();
-  fillSelect('web-key', (w.keys || []).map(k => [k.key, k.key + '  (' + k.value + ')']),
-             selVal('web-key') || (w.keys || [])[0]?.key || '');
-  fillSelect('web-provider', (w.providers || []).filter(p => p.env && p.env !== '-')
-             .map(p => [p.env, p.name + '  ·  ' + p.env]), selVal('web-provider'));
-  webFormFill();
-  setHint('acc-integ-hint', 'A chat platform needs both halves: the token in .env and '
-    + 'enabled: true in config.yaml. A backend key lands in .env; which backend is active is the '
-    + '`web` block above. Anything deeper than these settings stays with `hermes tools`, '
-    + '`hermes mcp` and `hermes -p <project> gateway setup` in a terminal.');
+  function webSettingCell(k){
+    const input = document.createElement('input');
+    input.autocomplete = 'off';
+    input.placeholder = k.value === '(default)' ? '(default)' : k.value;
+    if (k.value !== '(default)') input.value = k.value;
+    input.title = 'New value for web.' + k.key + '; sent as POST and written into this project\'s'
+      + ' config.yaml after a backup.';
+    const wrap = document.createElement('span');
+    wrap.className = 'inrow';
+    wrap.append(input,
+      btn('Save', 'primary', () => webSaveSettingRow(k.key, input),
+          'herman c <project> web ' + k.key + '=<value>'));
+    return {node: wrap};
+  }
+  table('acc-web-settings-table', ['Setting', 'Now', 'New value', ''],
+    (w.keys || []).filter(k => k.key !== 'backend').map(k => [k.key, k.value, webSettingCell(k), '']),
+    'no web settings reported');
+  // Which backend is in use is answered by the "in use" row above, so nothing here repeats it.
+
+  setHint('acc-integ-hint', 'A chat platform needs both halves: the token in .env and enabled: true in '
+    + 'config.yaml. A backend is chosen by its "Use this backend" button (that is `web.backend`), and '
+    + 'its key or URL is pasted into its own row. Anything deeper than these settings stays with '
+    + '`hermes tools`, `hermes mcp` and `hermes -p <project> gateway setup` in a terminal.');
   const on = (d.chat || []).filter(c => c.enabled).length;
   const cnt = document.getElementById('acc-count-integ');
   if (cnt) cnt.textContent = on;
@@ -4671,6 +4719,13 @@ function fmtTime(ts){
 
 function runFocus(action, extra){ run(action, focusProject, extra); }
 function removeFocus(){ removeProject(focusProject); }
+/* Panes that own their own fetch run it when they are SHOWN. Without this, switching to a sub-tab left
+   the pane with whatever it had from the last project (or nothing at all), which is indistinguishable
+   from an empty board and was reported as exactly that. The model board's tabs are not listed here:
+   modelTab() already loads them. */
+const PANE_LOADERS = {
+  'access:integrations': () => loadIntegrationsWhenReady(),
+};
 function vtab(view, key){
   const root = document.getElementById('view-' + view);
   if (!root) return;
@@ -4684,6 +4739,8 @@ function vtab(view, key){
     if (el.classList.contains('subpane')) el.classList.toggle('on', on);
   });
   if (!panes.some(p => p.classList.contains('on'))) panes[0].classList.add('on');
+  const loader = PANE_LOADERS[view + ':' + known];
+  if (loader) loader();
 }
 function vtabRestore(view){
   vtab(view, localStorage.getItem('herman.vt.' + view) || '');
