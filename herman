@@ -1651,8 +1651,71 @@ def profile_stats(name: str) -> dict:
     }
 
 
+# How many cards the operator can pin to the top of the Projects board. Three is what fits the first
+# row of the grid, which is the point of pinning: the projects you are working on stay in sight.
+MAX_PINS = 3
+
+
+def ordered_projects() -> list[str]:
+    """Project names in the operator's own order: pinned first, then the saved order, then the rest.
+
+    The panel's drag handler writes this order into herman's own state (state.json), never into
+    Hermes: profiles are Hermes' business, the display order is herman's. Names that no longer exist
+    are dropped, and a project created later simply lands after the ones that were placed by hand.
+    """
+    names = list_profiles()
+    state = load_state()
+    pins = [n for n in (state.get("pins") or []) if n in names][:MAX_PINS]
+    order = [n for n in (state.get("order") or []) if n in names and n not in pins]
+    # The rest keeps the order Hermes itself reports (the engine lists the busiest profile first):
+    # herman only moves what the operator actually placed, it does not re-sort the board from scratch.
+    rest = [n for n in names if n not in pins and n not in order]
+    return pins + order + rest
+
+
+def set_project_order(names: list[str]) -> dict:
+    """Save the card order (drag and drop). Unknown names are refused, not silently dropped."""
+    known = set(list_profiles())
+    clean = [n for n in names if n]
+    unknown = [n for n in clean if n not in known]
+    if unknown:
+        return {"ok": False, "error": "unknown project(s): " + ", ".join(unknown[:4])}
+    state = load_state()
+    pins = [n for n in (state.get("pins") or []) if n in known]
+    # Store the order WITHOUT the pinned ones: they are always drawn first, so keeping them here too
+    # would mean the same position is written twice and unpinning would jump the card around.
+    state["order"] = [n for n in clean if n not in pins]
+    save_state(state)
+    return {"ok": True, "order": state["order"], "pinned": pins}
+
+
+def set_project_pin(name: str, pinned: bool) -> dict:
+    """Pin a project to the first row of the board, or release it. At most MAX_PINS at a time."""
+    known = set(list_profiles())
+    if name not in known:
+        return {"ok": False, "error": f"project '{name}' does not exist"}
+    state = load_state()
+    pins = [n for n in (state.get("pins") or []) if n in known]
+    if pinned:
+        if name in pins:
+            return {"ok": True, "pinned": pins}
+        if len(pins) >= MAX_PINS:
+            return {"ok": False, "error": f"only {MAX_PINS} projects can be pinned: release one first "
+                                          f"({', '.join(pins)})"}
+        pins.append(name)
+    else:
+        pins = [n for n in pins if n != name]
+    state["pins"] = pins
+    save_state(state)
+    return {"ok": True, "pinned": pins}
+
+
 def stats_all() -> list[dict]:
-    return [profile_stats(n) for n in list_profiles()]
+    """Every project, in the operator's order, each carrying its pin state for the board's card."""
+    pins = set(n for n in (load_state().get("pins") or []) if profile_exists(n))
+    return [{**profile_stats(n), "pinned": n in pins} for n in ordered_projects()]
+
+
 
 
 def ensure_profile(name: str):
@@ -1921,6 +1984,7 @@ EVERYDAY (short: the project is optional, it defaults to the focus project)
   {PROG} sec                          the panel's security battery
   {PROG} a [name]                     keys, hosts, git credential, connections
   {PROG} g [name] ...                 git status / identity / remotes
+  {PROG} pin [name] | unpin <name>    keep a project in the first row of the Projects board
   {PROG} mem [name]                   built-in memory vs budget, and the engine's providers
   {PROG} mem [name] add <provider>    hand over to the engine's setup wizard (key asked there)
   {PROG} mem [name] off|reset         built-in only / erase both files (asks, and archives first)
@@ -3269,7 +3333,12 @@ def cmd_web(argv: list[str]):
                 if u.path == "/api/usage":
                     self._json(usage_report(nm))
                 elif u.path == "/api/search":
-                    self._json(search_history(nm, q.get("q", [""])[0]))
+                    # scope=all searches every project and tags each hit with the project it came
+                    # from; the plain form stays one project (what the Insights board always did).
+                    if q.get("scope", [""])[0] == "all":
+                        self._json(search_all_projects(q.get("q", [""])[0], prefer=nm))
+                    else:
+                        self._json(search_history(nm, q.get("q", [""])[0]))
                 elif u.path == "/api/skills":
                     self._json(skills_report(nm))
                 elif u.path == "/api/memory":
@@ -3406,6 +3475,28 @@ def cmd_web(argv: list[str]):
                     return
                 self._json({"ok": True, "name": nm,
                             "description": set_description(nm, q.get("text", [""])[0])})
+                return
+            if u.path in ("/api/project-order", "/api/project-pin"):
+                # herman's own display state: the order of the cards and the pinned handful. Nothing
+                # here touches Hermes, and both are POST-only like every other write.
+                if method != "POST":
+                    self._json({"error": f"'{u.path.split('/')[-1]}' changes state: send it with POST"}, 405)
+                    return
+                if u.path == "/api/project-order":
+                    raw = (q.get("order", [""])[0] or "").strip()
+                    names = [n.strip() for n in raw.split(",") if n.strip()]
+                    if not names or len(names) > 400 or any(len(n) > 64 for n in names):
+                        self._json({"error": "order is a comma-separated list of project names"}, 400)
+                        return
+                    res = set_project_order(names)
+                else:
+                    nm = (q.get("name", [""])[0] or "").strip()
+                    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", nm):
+                        self._json({"error": "unknown project"}, 400)
+                        return
+                    want = (q.get("pinned", ["1"])[0] or "1") in ("1", "true", "yes", "on")
+                    res = set_project_pin(nm, want)
+                self._json(res, 200 if res.get("ok") else 400)
                 return
             if u.path in ("/api/soul-save", "/api/uninstall-skill", "/api/tool-toggle",
                           "/api/remove-skill"):
@@ -6032,6 +6123,50 @@ def search_history(name: str, query: str, limit: int = 40) -> dict:
     return out
 
 
+def search_all_projects(query: str, *, prefer: str = "", per_project: int = 12,
+                        limit: int = 40) -> dict:
+    """Search every project's history at once, tagging each hit with the project it came from.
+
+    The search bar used to look at one project, which is fine only if you already know where the thing
+    you are looking for happened. Running over all of them (read-only, one state.db at a time) means a
+    hit can say "this came from <project>", and the focus project's own hits are listed first so the
+    common case still reads top-down.
+    """
+    q = (query or "").strip()
+    out: dict = {"query": q, "hits": [], "total": 0, "projects": [], "mode": "fts", "prefer": prefer}
+    if not q:
+        return out
+    names = ordered_projects()
+    if not names:
+        return out
+    names = ([prefer] if prefer in names else []) + [n for n in names if n != prefer]
+    per_project = max(1, min(int(per_project), 40))
+    limit = max(1, min(int(limit), 200))
+    merged: list[dict] = []
+    searched = 0
+    for name in names:
+        if not (profile_home(name) / "state.db").exists():
+            continue
+        res = search_history(name, q, limit=per_project)
+        searched += 1
+        if res.get("error") and not res.get("hits"):
+            continue
+        modes = res.get("mode")
+        if modes == "like":
+            out["mode"] = "like"
+        for hit in (res.get("hits") or []):
+            hit["project"] = name
+            merged.append(hit)
+    # The focus project first, then newest first inside each project: the operator's own context is
+    # what they were looking for, and a fleet-wide wall of hits would bury it.
+    merged.sort(key=lambda h: (0 if h.get("project") == prefer else 1, -(h.get("timestamp") or 0)))
+    out["hits"] = merged[:limit]
+    out["total"] = len(merged)
+    out["projects"] = sorted({h["project"] for h in merged})
+    out["searched"] = searched
+    return out
+
+
 def message_detail(name: str, msg_id: int, around: int = 3, cap: int = 20000) -> dict:
     """One message in full, plus the messages around it, for the search detail view."""
     out: dict = {"project": name, "id": msg_id, "msg": None, "before": [], "after": [], "session": {}}
@@ -6437,6 +6572,32 @@ def memory_reset(name: str, *, assume_yes: bool = False, dry: bool = False) -> i
         return 0
     print(red((res.stderr or res.stdout or "memory reset failed").strip()))
     return res.returncode
+
+
+def do_pin(args: list[str], *, unpin: bool = False, dry: bool = False) -> int:
+    """`herman pin [project|--list]` and `herman unpin <project>`.
+
+    Pinning keeps a card in the first row of the Projects board; the order inside that row (and the
+    order of the rest) is dragged in the panel. herman stores both in its own state, never in Hermes.
+    """
+    if not args or args[0] in ("-l", "--list", "list", "ls"):
+        pins = [n for n in (load_state().get("pins") or []) if profile_exists(n)]
+        lines = [f"{i + 1}. {n}" for i, n in enumerate(pins)] or [f"nothing pinned (at most {MAX_PINS})"]
+        print_frame("pinned projects", lines, color=blue, width=min(term_width(), 104))
+        print()
+        print(dim(f"  pin one : {PROG} pin <project>      release : {PROG} unpin <project>"))
+        print(dim("  the Projects board is where the order is dragged (and where a pin is one click)"))
+        return 0
+    project, _rest = _short_project(args)
+    res = set_project_pin(project, not unpin)
+    if not res.get("ok"):
+        die(res["error"])
+    if dry:
+        print(dim(f"  [dry-run] would {'release' if unpin else 'pin'} {project}"))
+        return 0
+    ok(("released " if unpin else "pinned ") + bold(project)
+       + " · pinned now: " + (", ".join(res["pinned"]) or "none"))
+    return 0
 
 
 def do_memory(args: list[str], *, dry: bool = False, assume_yes: bool = False) -> int:
@@ -8365,6 +8526,8 @@ def main(argv: list[str]) -> int:
         do_git(nm, None, dry=dry)
         return 0
 
+    if cmd in ("pin", "unpin"):
+        return do_pin(rest[1:], unpin=(cmd == "unpin"), dry=dry)
     if cmd in ("mem", "memory"):
         return do_memory(rest[1:], dry=dry, assume_yes=assume_yes)
     if cmd in ("skill", "skills"):

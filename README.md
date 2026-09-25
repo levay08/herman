@@ -67,6 +67,8 @@ herman -p work               create a project (a Hermes profile)
 herman work                  enter its Hermes session (hands the terminal over to hermes)
 herman -u 2                  enter project number 2
 herman -l | -i [name]        list projects / inspect one
+herman pin [name]            keep a project in the first row of the Projects board (three at most)
+herman unpin <name>          release it again (`herman pin --list` shows what is pinned)
 herman -r <name>             delete a project and its profile
 herman --rename <old> <new>  rename a project (its profile, shortcut command and note follow)
 herman -d [name|--all]       doctor: read-only health check
@@ -153,13 +155,18 @@ herman skill <name> rm <name> | up | taps   uninstall / update all / extra sourc
 herman web
 ```
 
-Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is exchanged for an
+Serves `127.0.0.1:9120` and prints a URL carrying a random token. The sidebar keeps **Open projects**
+(and the project count) right under the dashboard button, for the way back to the board. The token is exchanged for an
 `HttpOnly` cookie on first load, so it does not stay in your address bar, history or link referrers.
 
 - **Dashboard** all-project overview plus total token usage
-- **Projects** one card per project (model, workdir, skills, memory, live session), with the note and
-  the name editable on the card itself (the pencil beside the title renames the profile folder, its
-  shortcut command and herman's own notes); actions stream their output into the console at the bottom.
+- **Projects** three cards per row, one card per project (model, workdir, skills, memory, live session),
+  with the note and the name editable on the card itself (the pencil beside the title renames the
+  profile folder, its shortcut command and herman's own notes). Drag a card by its title to reorder the
+  board and click the **pin** tag to keep up to three in the first row: both are stored in herman's own
+  state, never in Hermes, and the same order is what `herman -l` and the focus dropdown show. The create
+  form sits collapsed under the grid, so the cards get the full width. Actions stream their output into
+  the console at the bottom.
   `Enter session` holds a loading overlay over the panel until that project's session lease appears in
   the grid (Escape hides it early; the wait keeps reporting in the console), so a cold start never
   looks like a dead button
@@ -170,14 +177,18 @@ Serves `127.0.0.1:9120` and prints a URL carrying a random token. The token is e
   the engine's memory providers with what each one needs and a link to its docs, a **Set up** button
   that opens the engine's own wizard in a terminal window, and `off` / erase (`Erase` archives both
   files into `~/.cache/herman/memory-backups/` before the engine wipes them)
-- **Insights** history search (click a hit to read the full message), activity, tool counters,
-  context health, error digest
+- **Insights** history search that follows what you type (no button needed) and looks in EVERY project:
+  each hit carries a tag naming the project it came from, the focus project's hits come first, and
+  opening one reads that profile's own `state.db`; plus activity, tool counters, context health, error
+  digest
 - **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections, and the
   **Integrations** tab: chat platforms (token, `enabled`, the platform's own settings) and web
   search/extract backends (which backend is active, and one backend key per provider)
 - **MCP** the servers in a project's `mcp_servers` with add, enable/disable and remove, plus every
   `hermes mcp` subcommand and whether it opens a connection
-- **Maintenance** backups, disk space, about
+- **Maintenance** backups, disk space, about, and a **This project** tab that names the project its
+  buttons will act on (home, workdir, model, skills, memory, running session, gateway, last used), so the
+  focus project in the header is never something you have to remember
 
 Notes: the panel listens on loopback only, and everything inside it that changes state asks you to
 type a name first (a delete, a rename, a removed MCP server, a dropped key, an installed skill and

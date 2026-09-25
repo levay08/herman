@@ -242,6 +242,13 @@
          gap:var(--s3);align-items:start}
   .split-main{min-width:0}
   .create-card{border-color:var(--teal-line);background:var(--surface2);overflow:hidden}
+  /* The create form sits under the grid in a collapsed <details>: the cards need the full width for
+     three per row, and creating a project is a one-time action, not something to keep on screen. */
+  .create-wrap{margin-top:var(--s3)}
+  .create-wrap > summary{cursor:pointer;font-size:11.4px;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--dim2);padding:6px 2px}
+  .create-wrap[open] > summary{color:var(--text)}
+  .create-wrap .create-card{max-width:520px;margin-top:var(--s2)}
   .create-card h3{display:flex;align-items:center;gap:8px}
   .create-card h3::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--teal);
                           flex:0 0 auto}
@@ -334,10 +341,20 @@
   .msgs .top{display:flex;gap:var(--s2);flex-wrap:wrap;font-size:11.2px;color:var(--dim2)}
   .msgs .txt{font-size:12.1px;color:var(--dim);margin-top:3px;white-space:pre-wrap;
              overflow-wrap:anywhere;max-height:96px;overflow:hidden}
-  .grid.cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(318px,1fr));gap:var(--s3);
+  /* Three cards per row, as the board is meant to read: auto-fill gave four or five narrow ones on a
+     wide screen and two columns left a lot of empty space. Two columns at 1180px and one at 820px. */
+  .grid.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s3);
              align-items:start}
 
   /* ---------- project cards ---------- */
+  /* The card head is the drag handle for reordering; the buttons and inputs inside a card keep their
+     own clicks, and a drag never starts from them (see dragStart in the card builder). */
+  .proj-head{cursor:grab}
+  .proj-head:active{cursor:grabbing}
+  .proj.dragging{opacity:.5;outline:1px dashed var(--dim2)}
+  .proj.drop-target{box-shadow:0 0 0 2px var(--teal)}
+  .proj-shift{opacity:.45}
+  .pin-tag{cursor:pointer}
   .proj{padding:var(--s4) var(--s4) var(--s3);display:flex;flex-direction:column;gap:10px;
         height:100%;overflow:hidden}
   .proj .proj-actions{margin-top:auto}
@@ -568,8 +585,13 @@
   .boot-note{font-size:11.4px;color:var(--dim2)}
 
   /* ---------- responsive ---------- */
+  @media (max-width:1180px){
+    .grid.cols{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
   @media (max-width:1080px){
     :root{--content-max:100%}
+  }
+  @media (max-width:820px){
     .grid.cols{grid-template-columns:1fr}
   }
   @media (max-width:900px){
@@ -648,6 +670,10 @@
               title="Starts `hermes dashboard` in the background (port 9119) when needed, then opens it.">
         Open Hermes dashboard
       </button>
+      <button class="ghost" id="open-projects" onclick="navigate('projects')"
+              title="The Projects board: one card per Hermes profile. Drag a card by its title to reorder, pin up to three to the first row.">
+        Open projects <span class="n" id="nav-count-foot">0</span>
+      </button>
       <span class="side-note" id="home-note"></span>
     </div>
   </aside>
@@ -717,12 +743,10 @@
 
       <section class="view" id="view-projects">
         <p class="note">Every card is one Hermes profile: hover a button to see the command it runs. Anything that deletes or rewrites data asks you to type the name first. Model, git and access details live on their own boards.</p>
-        <div class="split">
-          <div class="split-main">
-            <div class="grid cols" id="grid"></div>
-            <p class="hint" id="projects-hint"></p>
-          </div>
-          <aside class="split-side">
+        <div class="grid cols" id="grid"></div>
+        <p class="hint" id="projects-hint"></p>
+        <details class="create-wrap" id="create-wrap">
+          <summary>Create a project</summary>
             <div class="card pad create-card">
               <h3 class="sec-title">Create project</h3>
               <p class="note">A project is an isolated Hermes profile: its own model, skills, memory and sessions. Creating one also adds a shortcut command with the same name.</p>
@@ -751,8 +775,7 @@
                 <button class="primary" onclick="createProject()" title="herman -p <name> · progress shows in the output panel.">Create project</button>
               </div>
             </div>
-          </aside>
-        </div>
+        </details>
       </section>
 
       <section class="view" id="view-model">
@@ -949,10 +972,11 @@
           <div class="card pad">
             <div class="row">
               <div>
-                <label class="f" for="search-q">Search the whole message history</label>
-                <input id="search-q" placeholder="e.g. timeout, deploy, api key" autocomplete="off">
+                <label class="f" for="search-q">Search the message history of every project</label>
+                <input id="search-q" placeholder="e.g. timeout, deploy, api key" autocomplete="off"
+                       oninput="searchTyped()">
               </div>
-              <button onclick="doSearch()" title="Full-text search over the messages_fts index (LIKE fallback).">Search</button>
+              <button onclick="doSearch()" title="Full-text search over every project's messages_fts index (LIKE fallback), focus project first. The list follows what you type.">Search</button>
             </div>
             <p class="hint" id="search-note">Search a word or phrase; newest hits come first.</p>
             <div id="search-hits" class="hits"></div>
@@ -1268,6 +1292,12 @@
 
         <div class="subpane" data-sub="focus">
           <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">The project these buttons act on</div>
+            <p class="hint" id="focus-note">…</p>
+            <dl class="kv" id="focus-kv"></dl>
+          </div>
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">What you can do here</div>
             <div class="btnrow">
               <button onclick="runFocus('info')" title="herman -i <project>: project card.">Info</button>
               <button onclick="runFocus('doctor')" title="herman -d <project>: read-only health check.">Doctor</button>
@@ -1629,6 +1659,7 @@ function onFocusChange(){
   loadInsights();
   loadModelTabIfVisible();            // skills, tools and SOUL.md belong to the focus project as well
   loadIntegrations();                 // the MCP / integration option lists are per project too
+  renderFocusPane();                  // Maintenance's This project pane names the project it acts on
   activateProject(document.getElementById('focus').value);
 }
 async function activateProject(name){
@@ -1742,6 +1773,8 @@ function renderProjects(d){
   projects = d.projects;
   dashInfo = d.dashboard || {};
   document.getElementById('nav-count').textContent = d.projects.length;
+  const foot = document.getElementById('nav-count-foot');
+  if (foot) foot.textContent = d.projects.length;
   const homeDir = d.projects[0] ? d.projects[0].home.replace(/\/[^/]+$/, '') : '~/.hermes';
   document.getElementById('home-note').textContent = 'projects home: ' + homeDir;
   document.getElementById('dash-tag').textContent = 'dashboard ' + (dashInfo.running ? 'running' : 'stopped');
@@ -1762,6 +1795,7 @@ function renderProjects(d){
 
   tiles(d);
   grid(d.projects);
+  renderFocusPane();                  // the pane's header names the project even before its tab is opened
   about(d);
   backupTable();
   setHint('projects-hint', d.projects.length
@@ -1861,6 +1895,7 @@ function loadModelTabIfVisible(){
   const v = document.getElementById('view-model');
   if (v && v.classList.contains('on')) loadModelTab();
 }
+let dragName = null;                  // the card being dragged across the Projects board
 let skillData = null, toolData = null;
 async function loadSkills(){
   if (!document.getElementById('skills-table')) return;
@@ -3534,10 +3569,12 @@ function deleteThisSession(){
   run('history-delete-session', nm, {session: s.id});
   setTimeout(() => { if (typeof doSearch === 'function') doSearch(); }, 2500);
 }
-async function openMessage(msgId){
+async function openMessage(msgId, project){
   if (!msgId) return;
   const sel = document.getElementById('focus');
-  const nm = focusProject || (sel ? sel.value : '');
+  /* A search hit carries its own project: opening it has to read THAT profile's state.db, or the id
+     would be looked up in the focus project and come back as a different message (or none). */
+  const nm = project || focusProject || (sel ? sel.value : '');
   setStatus('busy', 'Loading message…');
   try {
     const d = await (await fetch(`/api/message?t=${TOKEN}&name=${encodeURIComponent(nm)}&id=${msgId}`)).json();
@@ -3631,31 +3668,53 @@ function gotoSession(){
   location.hash = '#/insights';
 }
 
+let searchTimer = null, searchSeq = 0;
+function searchTyped(){
+  /* Live search: the list follows what is typed. A short pause keeps a fast typist from firing one
+     query per keystroke, and the sequence number keeps an older answer from overwriting a newer one. */
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => doSearch(), 250);
+}
 async function doSearch(){
   const box = document.getElementById('search-hits');
   const q = (document.getElementById('search-q').value || '').trim();
   if (!box) return;
   box.textContent = '';
-  if (!q){ setHint('search-note', 'Type a keyword first.'); return; }
+  if (!q){
+    setHint('search-note', 'Type a keyword: the list follows what you type, and it looks in every '
+      + 'project, not just the focus one.');
+    return;
+  }
   const sel = document.getElementById('focus');
   const nm = focusProject || (sel ? sel.value : '');
-  setHint('search-note', 'searching "' + q + '" in ' + (nm || '?') + '…');
+  const seq = ++searchSeq;
+  setHint('search-note', 'searching "' + q + '" in every project…');
   try {
-    const d = await (await fetch(`/api/search?t=${TOKEN}&name=${encodeURIComponent(nm)}&q=${encodeURIComponent(q)}`)).json();
-    setHint('search-note', Number(d.total || 0).toLocaleString('en-US') + ' matches · showing '
-      + (d.hits || []).length + ' newest (mode ' + (d.mode || '-') + ')');
-    (d.hits || []).forEach(h => {
+    const d = await (await fetch(`/api/search?t=${TOKEN}&name=${encodeURIComponent(nm)}&q=${encodeURIComponent(q)}&scope=all`)).json();
+    if (seq !== searchSeq) return;                 // a newer keystroke already asked
+    const hits = d.hits || [];
+    setHint('search-note', Number(d.total || 0).toLocaleString('en-US') + ' hits in '
+      + ((d.projects || []).length || 1) + ' project(s) · newest ' + hits.length + ' shown (mode '
+      + (d.mode || '-') + ') · the tag on each hit says which project it came from');
+    hits.forEach(h => {
       const el = document.createElement('div'); el.className = 'hit clickable';
       el.tabIndex = 0; el.setAttribute('role', 'button');
-      el.title = 'Open this message in full, with the lines around it.';
-      el.onclick = () => openMessage(h.msg_id);
-      el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openMessage(h.msg_id); } };
+      el.title = 'Open this message in full, with the lines around it. It belongs to the project "'
+        + h.project + '".';
+      el.onclick = () => openMessage(h.msg_id, h.project);
+      el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openMessage(h.msg_id, h.project); } };
       const top = document.createElement('div'); top.className = 'top';
       const a = document.createElement('span'); a.textContent = h.when;
+      /* Which project this hit came from, before the role: without it a fleet-wide search reads as a
+         pile of fragments with no context. */
+      const pj = document.createElement('span');
+      pj.className = 'tag' + (h.project === nm ? ' ok' : '');
+      pj.textContent = h.project + (h.project === nm ? ' · focus' : '');
+      pj.title = 'This message lives in the project "' + h.project + '". Opening it reads that profile.';
       const b = document.createElement('span'); b.textContent = h.role + (h.tool_name ? ' · ' + h.tool_name : '');
       const c = document.createElement('span'); c.textContent = h.title || h.session_id || '';
       const o = document.createElement('span'); o.className = 'open'; o.textContent = 'open ›';
-      top.append(a, b, c, o);
+      top.append(a, pj, b, c, o);
       const txt = document.createElement('div'); txt.className = 'txt';
       String(h.snippet || '').split(/(\[[^\]]*\])/).forEach(part => {
         if (part.length > 2 && part.startsWith('[') && part.endsWith(']')){
@@ -3665,6 +3724,42 @@ async function doSearch(){
       el.append(top, txt); box.appendChild(el);
     });
   } catch (e) { setHint('search-note', 'could not load search results'); }
+}
+
+function renderFocusPane(){
+  /* The Maintenance board acts on ONE project, and the header alone is easy to lose track of. So the
+     pane names the project it will act on, with its facts, before the buttons that do it. */
+  const el = document.getElementById('focus-kv');
+  if (!el) return;
+  const p = (projects || []).find(x => x.name === focusProject);
+  if (!p){
+    kv('focus-kv', []);
+    setHint('focus-note', 'No project is picked in the top bar yet: every button below acts on the '
+      + 'focus project, so pick one first.');
+    return;
+  }
+  const live = p.sessions || [];
+  const isHermesDefault = p.name === activeProjectName;
+  kv('focus-kv', [
+    ['project', p.name + (p.pinned ? '   (pinned to the first row)' : '')],
+    ['is this the project the header shows?', 'yes, this is the focus project'],
+    ['hermes sticky profile', isHermesDefault
+      ? 'this one: a bare `hermes` starts here'
+      : (activeProjectName || '-') + ' (the header shows that one as active; this card is only the focus here)'],
+    ['home', p.home],
+    ['workdir', p.cwd && p.cwd !== '-' ? p.cwd : '(not set: Hermes starts in its own home)'],
+    ['model', p.model || '-'],
+    ['skills', (p.skills || 0) + ' folder(s) with SKILL.md'],
+    ['memory', (p.memory_bytes ? (p.memory_bytes / 1024).toFixed(1) + ' KB' : '0 KB')],
+    ['session running', live.length ? live.length + ' · ' + sessTip(live) : 'none'],
+    ['gateway', p.gateway === 'running' ? 'running' : 'stopped (no messaging platform is up)'],
+    ['last used', p.last_used ? new Date(p.last_used * 1000).toLocaleString() : 'never'],
+    ['description', p.description || '(none)'],
+  ]);
+  setHint('focus-note', 'These buttons act on ' + p.name + ' only.'
+    + (live.length ? ' A session is running there: Back up and Tidy are safe, Delete asks for the name first.' : '')
+    + (isHermesDefault ? '' : ' Note that Hermes\' own sticky profile is ' + activeProjectName
+        + ', so a bare `hermes` inside a terminal starts in that one.'));
 }
 
 function grid(list){
@@ -3706,6 +3801,18 @@ function card(p){
     nameWrap.appendChild(tools);
   }
   head.appendChild(nameWrap);
+  /* Pin and drag live on the card: the pin keeps it in the first row (three at most) and the head is
+     the handle you drag by. Both write into herman's own state (state.json), never into Hermes. */
+  const pinTag = tag(p.pinned ? 'pinned' : 'pin', p.pinned ? 'ok' : '');
+  pinTag.classList.add('pin-tag');
+  pinTag.setAttribute('role', 'button');
+  pinTag.tabIndex = 0;
+  pinTag.title = p.pinned
+    ? 'Release ' + p.name + ' from the first row (`herman unpin ' + p.name + '`).'
+    : 'Keep ' + p.name + ' in the first row (`herman pin ' + p.name + '`): three projects at most.';
+  pinTag.onclick = ev => { ev.stopPropagation(); togglePin(p.name, !p.pinned); };
+  pinTag.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); togglePin(p.name, !p.pinned); } };
+  head.appendChild(pinTag);
   if (p.active) head.appendChild(tag('active', 'ok'));
   /* Only a gateway that actually runs earns a tag: a project with no messaging platform configured
      is the normal case, so "stopped" is never printed as a status here. */
@@ -3771,7 +3878,59 @@ function card(p){
         + 'cache and errors of ' + p.name + ' only.')
   );
   el.appendChild(row);
+  makeCardDraggable(el, p);
   return el;
+}
+/* Reordering is a herman concern (the display order of profiles), so the drop posts to herman's own
+   endpoint and the card is redrawn at once: waiting for the round trip before moving anything makes a
+   drop feel broken. */
+function clearDropMarks(){
+  document.querySelectorAll('.proj.drop-target').forEach(c => c.classList.remove('drop-target'));
+}
+function makeCardDraggable(el, p){
+  el.draggable = true;
+  el.addEventListener('dragstart', ev => {
+    /* A drag that starts on a button, an input or a link keeps its normal behaviour: the card is the
+       handle, but nothing inside it becomes hard to click. */
+    if (ev.target.closest('input,button,textarea,select,a,span.pin-tag')) { ev.preventDefault(); return; }
+    dragName = p.name;
+    el.classList.add('dragging');
+    ev.dataTransfer.effectAllowed = 'move';
+    try { ev.dataTransfer.setData('text/plain', p.name); } catch (e) { /* Firefox needs the setData call only */ }
+  });
+  el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragName = null; clearDropMarks(); });
+  el.addEventListener('dragover', ev => {
+    if (!dragName || dragName === p.name) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    el.classList.add('drop-target');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+  el.addEventListener('drop', ev => {
+    ev.preventDefault();
+    el.classList.remove('drop-target');
+    if (dragName && dragName !== p.name) reorderCards(dragName, p.name);
+  });
+}
+function reorderCards(from, to){
+  const order = (projects || []).map(x => x.name);
+  const i = order.indexOf(from), j = order.indexOf(to);
+  if (i < 0 || j < 0 || i === j) return;
+  const moved = order.splice(i, 1)[0];
+  order.splice(j, 0, moved);
+  projects = order.map(n => projects.find(x => x.name === n));
+  grid(projects);
+  postJson('/api/project-order', {order: order.join(',')}).then(d => {
+    if (!d.ok){ setStatus('error', d.error || 'could not save the card order'); refresh(); return; }
+    setStatus('ok', 'card order saved');
+  });
+}
+async function togglePin(name, pinned){
+  setStatus('busy', (pinned ? 'pinning ' : 'releasing ') + name + '…');
+  const d = await postJson('/api/project-pin', {name: name, pinned: pinned ? '1' : '0'});
+  if (!d.ok){ setStatus('error', d.error || 'could not change the pin'); return; }
+  setStatus('ok', pinned ? name + ' pinned to the first row' : name + ' released');
+  await refresh();
 }
 
 /* ---------- live session display (card + modal) ---------- */
@@ -4725,6 +4884,7 @@ function removeFocus(){ removeProject(focusProject); }
    modelTab() already loads them. */
 const PANE_LOADERS = {
   'access:integrations': () => loadIntegrationsWhenReady(),
+  'maintenance:focus': () => renderFocusPane(),
 };
 function vtab(view, key){
   const root = document.getElementById('view-' + view);
