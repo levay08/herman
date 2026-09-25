@@ -691,7 +691,9 @@ def integrations_report(name: str) -> dict:
             "secret": secret,
             "secret_set": secret in env_names,
             "keys": rows,
-            "enable_hint": f"herman -u {name} gateway setup   (interactive: platform token + allowlist)",
+            # herman owns no `gateway` verb: entering a session hands the terminal to hermes, so the
+            # engine's own command is what the operator needs to be told.
+            "enable_hint": f"hermes -p {name} gateway setup   (interactive: platform token + allowlist)",
         })
     web_keys = ("backend", "search_backend", "extract_backend", "keyless_fallback", "cache_ttl_minutes")
     webblock = _yaml_block(cfg, "web") if cfg.exists() else {}
@@ -1828,6 +1830,25 @@ def do_list(as_json: bool = False):
     print(dim(f"enter a project: {PROG} <name>   ·   help: {PROG} -h"))
 
 
+# The engine's own verbs, for one error message: a person who types `herman gateway setup` is looking
+# for hermes, and "project 'gateway' does not exist" alone sends them hunting for a typo instead.
+ENGINE_VERBS = ("chat", "model", "moa", "fallback", "worktree", "browser", "secrets", "egress",
+                "migrate", "gateway", "proxy", "lsp", "setup", "whatsapp", "slack", "send", "login",
+                "logout", "auth", "status", "pause", "resume", "cron", "webhook", "peer", "portal",
+                "kanban", "project", "hooks", "doctor", "verify", "security", "approvals", "dump",
+                "debug", "backup", "checkpoints", "import", "config", "skin", "console", "pairing",
+                "skills", "bundles", "plugins", "curator", "pets", "journey", "learning", "memory",
+                "tools", "mcp", "sessions", "insights", "monitoring", "update", "uninstall", "acp",
+                "profile", "completion", "dashboard", "serve", "desktop", "gui", "logs")
+
+
+def engine_verb_hint(word: str, project: str | None = None, tail: str = "") -> str:
+    """The line that points at hermes when a herman command was really an engine command."""
+    where = " ".join(p for p in (f"hermes -p {project or '<project>'}", word, tail) if p)
+    return (f"'{word}' is a Hermes verb, not a herman one: herman has no such command. "
+            f"The engine's own form is `{where}`")
+
+
 def resolve_target(sel: str, rows: list[dict] | None = None) -> str:
     """Accept a project name or the number shown by `herman -l`."""
     s = (sel or "").strip()
@@ -1890,6 +1911,8 @@ def do_use(name: str | None, *, question: str | None = None, file: str | None = 
     name = name.strip()
     if name.isdigit():
         name = resolve_target(name)
+    if name in ENGINE_VERBS and not profile_exists(name):
+        die(engine_verb_hint(name))
     ensure_profile(name)
     if question == "-":
         question = sys.stdin.read()
@@ -2135,7 +2158,7 @@ def do_doctor(names: list[str], *, dry: bool = False, all_profiles: bool = False
         st = profile_stats(name)
         lines: list[str] = []
         if not (profile_home(name) / "config.yaml").exists():
-            lines.append(amber("config.yaml missing → run: " + f"{PROG} -u {name} setup"))
+            lines.append(amber("config.yaml missing → run: " + f"hermes -p {name} setup"))
         if st["model"] in ("-", ""):
             lines.append(amber("model not set"))
         res = run_hermes(["doctor"], name, dry=dry)
@@ -2151,7 +2174,7 @@ def do_doctor(names: list[str], *, dry: bool = False, all_profiles: bool = False
         else:
             color = amber
             lines += ["  " + red(ln.strip()) for ln in bad[:10]]
-            lines.append(dim("auto-fix: " + f"{PROG} -u {name} doctor --fix"))
+            lines.append(dim("auto-fix: " + f"hermes -p {name} doctor --fix"))
         print()
         print_frame(f"doctor · {name}  (engine: hermes doctor)", lines, color=color, width=w)
 
@@ -7914,6 +7937,20 @@ def main(argv: list[str]) -> int:
     if has("-u", "--use"):
         i = rest.index("-u") if "-u" in rest else rest.index("--use")
         name = rest[i + 1] if i + 1 < len(rest) and not rest[i + 1].startswith("-") else None
+        # `herman -u <project> gateway setup` used to drop the last two words and start a session: the
+        # operator asked the engine for something and herman answered with silence. Name the mismatch.
+        spare = [a for a in rest[i + 2:] if not a.startswith("-")]
+        for flag in ("-q", "-f"):
+            if flag in rest:
+                j = rest.index(flag)
+                if j + 1 < len(rest) and rest[j + 1] in spare:
+                    spare.remove(rest[j + 1])
+        if spare:
+            word = spare[0]
+            extra = engine_verb_hint(word, name) if word in ENGINE_VERBS else (
+                f"unexpected argument '{word}': `{PROG} -u <project>` takes -q <text> or -f <file>, "
+                f"nothing else")
+            die(extra)
         if name is None and not has("-q", "-f"):
             rows = stats_all()
             if not rows:
@@ -7932,6 +7969,10 @@ def main(argv: list[str]) -> int:
         return 0
 
     if not cmd.startswith("-"):
+        if cmd in ENGINE_VERBS and not profile_exists(cmd):
+            # the words after the verb belong in the hint, so the operator gets the exact command back
+            # (`rest` already has herman's own global flags stripped out)
+            die(engine_verb_hint(cmd, tail=" ".join(rest[1:])))
         do_use(cmd, question=val("-q", None), file=val("-f", None),
                verbose=verbose, dry=dry, assume_yes=assume_yes,
                close_others="--close-others" in rest)

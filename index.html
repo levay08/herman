@@ -2641,7 +2641,7 @@ function renderIntegrations(d){
   setHint('acc-integ-hint', 'A chat platform needs both halves: the token in .env and '
     + 'enabled: true in config.yaml. A backend key lands in .env; which backend is active is the '
     + '`web` block above. Anything deeper than these settings stays with `hermes tools`, '
-    + '`hermes mcp` and `herman -u <project> gateway setup` in a terminal.');
+    + '`hermes mcp` and `hermes -p <project> gateway setup` in a terminal.');
   const on = (d.chat || []).filter(c => c.enabled).length;
   const cnt = document.getElementById('acc-count-integ');
   if (cnt) cnt.textContent = on;
