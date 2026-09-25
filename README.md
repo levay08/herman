@@ -63,6 +63,10 @@ herman --usage [--days N]              tokens and estimated cost
 herman -b <name|--all>                 back up to ~/Documents/herman-backup/
 herman -x <file> [--as name]           restore a backup
 herman --tidy [--all] | --logs <name>  free disk space / read the agent log
+herman security                        re-run the panel's security battery: auth carriers, origin
+                                       and host guards, POST-only writes, argv shapes, body cap,
+                                       traversal, response headers, file modes. Read-only, so it is
+                                       safe to run any time (it exits non-zero on drift)
 ```
 
 **Configure (chat platforms, web backends, MCP servers)**
@@ -175,7 +179,14 @@ python3 preflight.py --install-hook .        # writes .git/hooks/pre-commit
 ```
 
 The hook scans what you staged and refuses the commit, so a description you typed in the panel (or
-any other operator data) cannot reach your history by accident.
+any other operator data) cannot reach your history by accident. It also refuses the names of your
+projects (matched on word boundaries), so a log line, an example or a screenshot caption cannot hand
+out the shape of your machine.
+
+Images are the one thing a text scanner cannot read: `preflight.py` says so rather than reporting
+them clean, so look at every screenshot before a release and take it from a throwaway HOME
+(`env -u HERMES_HOME HOME=/tmp/shots herman web --port 9123`), where no real project name, path or
+usage total exists to be captured.
 
 ## Uninstall
 
