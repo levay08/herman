@@ -52,7 +52,7 @@ def in_container() -> bool:
     if os.environ.get("HERMAN_IN_CONTAINER"):
         return True
     return any(Path(p).exists() for p in ("/.dockerenv", "/run/.containerenv"))
-VERSION = "0.3"
+VERSION = "0.4"
 AUTHOR = ""            # no personal name in a public repo
 REPO = "https://github.com/levay08/herman"   # shown wherever the old byline used to be
 TAGLINE = "hermes-agent · simple task manager"
@@ -5569,42 +5569,39 @@ def _operator_paragraph(pat: dict | None, tokens: int, who: str, calls: int = 0)
     calls_each = calls / user if user else 0
     parts = [f"Your side of it first: {who} sent {user:,} instructions over "
              f"{_n(int(pat.get('work_days') or 0), 'working day')} and "
-             f"{_n(int(pat.get('sessions') or 0), 'session')}, averaging {avg_chars:.0f} "
-             f"characters each. Each one set off about "
-             f"{_tok_text(tokens / user if user else 0)} tokens of the model reading and writing, and "
-             f"{calls_each:.1f} round trips to the model (one round trip is one question the agent "
-             f"asks it, tool calls included)."]
+             f"{_n(int(pat.get('sessions') or 0), 'session')}. Instructions here run "
+             f"{'long' if avg_chars >= 400 else 'short' if avg_chars < 120 else 'medium'} "
+             f"(a few hundred characters is a briefing, a few dozen is a nudge), and each one sets off "
+             f"a round trip to the model with the whole chat attached, tool calls included."]
     tiny = int(pat.get("tiny") or 0)
     longd = int(pat.get("long_brief") or 0)
     if longd and longd / user >= 0.25:
-        parts.append(f"{_n(longd, 'instruction')} were proper briefs over 400 characters. That is the good habit: "
-                     f"a long brief costs reading but usually saves rounds, and "
-                     f"{calls_each:.1f} round trips per instruction is what that trade produced here.")
+        parts.append("Several were proper briefs rather than nudges. That is the good habit: a long "
+                     "brief costs some reading but usually saves rounds, because the agent does not "
+                     "have to be steered back on track.")
     elif tiny >= 3 and tiny / user >= 0.15:
-        parts.append(f"{_n(tiny, 'instruction')} were one-liners under 13 characters, the keep-going nudge you "
-                     f"send when the agent stops early. Friendly reminder: every nudge is still a "
-                     f"whole round trip with the full chat attached, so saying up front what done "
-                     f"looks like is usually cheaper.")
+        parts.append("Quite a few were one-liners, the keep-going nudge you send when the agent stops "
+                     "early. Friendly reminder: every nudge is still a whole round trip with the full "
+                     "chat attached, so saying up front what done looks like is cheaper.")
     ones = int(pat.get("sessions_one") or 0)
     deeps = int(pat.get("sessions_deep") or 0)
     if deeps or ones:
         bits = []
         if deeps:
-            bits.append(f"{_n(deeps, 'session')} carried 15 or more instructions, the deepest taking "
-                        f"{int(pat.get('per_session_max') or 0)}")
+            bits.append("some threads run into the dozens of instructions")
         if ones:
-            bits.append(f"{_n(ones, 'session')} held a single instruction" + ("" if ones == 1 else " each"))
-        parts.append("Shape of the work: " + "; ".join(bits) + ". Both shapes are fine, they just "
+            bits.append("others are a single question")
+        parts.append("Shape of the work: " + " and ".join(bits) + ". Both shapes are fine, they just "
                      "bill differently: a long thread keeps re-reading its own history, while a "
                      "one-shot session pays full price for its first prompt and never gets to reuse "
                      "anything.")
     if pat.get("repeat_msgs"):
         samples = pat.get("repeat_samples") or []
         quoted = f", for example \"{samples[0][0]}\" twice" if samples else ""
-        parts.append(f"And {_n(int(pat['repeat_msgs']), 'message')} went out again word for word{quoted}. "
-                     f"That is the fingerprint of a chat that lost the thread before it finished the "
-                     f"job: the repeat costs the whole context a second time, which is the expensive "
-                     f"way to say \"we were here already\".")
+        parts.append(f"And messages went out again word for word{quoted}. That is the fingerprint of "
+                     f"a chat that lost the thread before it finished the job: the repeat costs the "
+                     f"whole context a second time, which is the expensive way to say \"we were here "
+                     f"already\".")
     hours = pat.get("hours") or []
     if hours and int(pat.get("hour_share") or 0) >= 30:
         stamps = [int(x[0]) for x in hours]
@@ -5615,8 +5612,7 @@ def _operator_paragraph(pat: dict | None, tokens: int, who: str, calls: int = 0)
         else:
             tail = ("good news, by the way: one sitting keeps the cache warm and avoids restarting "
                     "the thread from scratch")
-        parts.append(f"Most of it happens around {when} ({int(pat.get('hour_share') or 0)}% of the "
-                     f"instructions), and {tail}.")
+        parts.append(f"Most of it happens around {when}, and {tail}.")
     return " ".join(parts)
 
 
@@ -5630,45 +5626,44 @@ def _agent_paragraph(pat: dict | None, reason_share: float, out_share: float) ->
     names = ", ".join(f"{n} ({c:,})" for n, c in (pat.get("tools") or [])[:3])
     if assistants or tools:
         total_msgs = max(1, user + assistants + tools)
-        parts.append(f"Now the agent's side: it replied with {assistants:,} messages and ran {tools:,} "
-                     f"tool calls (commands, file edits, searches, browsing), which is about "
-                     f"{(tools / user):.1f} tool results per instruction of yours"
-                     + (f", led by {names}" if names else "")
-                     + f". Tool output is {_pct(tools, total_msgs)} of everything that exists in the "
-                       f"chat, and every turn has to read that again: most of the traffic here is the "
-                       f"agent's own work coming back, not your typing.")
+        parts.append("Now the agent's side: the traffic is mostly its own work coming back, not your "
+                     "typing. It replies and then runs tools for every instruction"
+                     + (f", mostly {', '.join(n for n, _c in (pat.get('tools') or [])[:3])}"
+                        if names else "")
+                     + ", and every turn of the chat has to read that output again. That is what makes "
+                       "the context grow, and the context is what you pay to have re-read.")
     if int(pat.get("longest_session") or 0) >= 150:
         extra = (f", and {_n(int(pat['big_sessions']), 'session')} went past 200 messages"
                  if pat.get("big_sessions") else "")
-        parts.append(f"The longest single chat reached {int(pat['longest_session']):,} messages"
-                     f"{extra}. Picture a conversation that long: each new turn has to read the whole "
-                     f"thing, and when it stops fitting in the model's short-term memory (its context "
-                     f"window) the engine squeezes the old part into a summary, which is exactly how "
-                     f"\"the agent forgot what we agreed\" happens.")
+        parts.append("One chat ran long enough to hit the edge of the model's short-term memory (its "
+                     "context window). Picture a conversation that long: each new turn re-reads the "
+                     "whole thing, and when it stops fitting the engine squeezes the old part into a "
+                     "summary, which is exactly how \"the agent forgot what we agreed\" happens.")
     if pat.get("compression_events"):
-        parts.append(f"That squeezing actually happened "
-                     f"{_n(int(pat['compression_events']), 'time')} across "
-                     f"{_n(int(pat['compression_sessions']), 'session')}.")
+        parts.append("That squeezing did happen here, so the agent was working from a summary of the "
+                     "earlier part of that chat.")
     if reason_share:
-        parts.append(f"{reason_share:.0f}% of everything written was reasoning, the model thinking to "
+        parts.append(f"About {'half' if 40 <= reason_share <= 60 else 'a third' if reason_share < 40 else 'most'} of everything written was reasoning, the model thinking to "
                      f"itself: you pay for those words, you never get to read them.")
     if out_share >= 40:
-        parts.append(f"Output is {out_share:.0f}% of the tokens, so the model spends more time writing "
-                     f"than reading here.")
+        parts.append("More is written than read here, which is unusual for agent work: the short "
+                     "answers you see are not the whole story.")
     else:
-        parts.append(f"Output is {out_share:.0f}% of the tokens, the usual shape for agent work: lots "
-                     f"of context read, a short answer written, so the reading side carries the cost.")
+        parts.append("Lots of context read, a short answer written: the usual shape for agent work, "
+                     "and the reason the reading side carries the cost.")
     return " ".join(parts)
 
 
 def _playbook(pat: dict | None, *, hit: float, out_share: float, reason_share: float,
               total: int, per_call_prompt: float = 0, limit: int = 0,
               models_used: int = 0) -> str:
-    """What to actually do next, ranked by what this project's own numbers show.
+    """The closing paragraph: what to do next, said the way a colleague would say it.
 
-    Two independent dials are named as such: the cache decides what a word of context costs, and how
-    much context you carry decides how many words there are. A tip only appears when its trigger is
-    measured, so nothing here is generic advice.
+    The figures live in the paragraphs above and in the tables, so this one names the HABIT, not the
+    number: it is the paragraph someone actually reads to change something. A tip only appears when
+    its trigger is measured here, so nothing in it is generic advice. Two dials are kept apart
+    throughout: the cache decides what a word of context costs, the size of the context decides how
+    many words there are.
     """
     pat = pat or {}
     user = max(1, int(pat.get("user_msgs") or 0))
@@ -5676,64 +5671,62 @@ def _playbook(pat: dict | None, *, hit: float, out_share: float, reason_share: f
     repeats = int(pat.get("repeat_msgs") or 0)
     tips: list[tuple[int, str]] = []
     if repeats >= 3:
-        tips.append((95, f"stop re-sending, start restating ({_n(repeats, 'message')} went out twice, "
-                         f"word for word): when a chat has lost the thread, a fresh session that opens "
-                         f"with the decision written down beats dragging the old history along"))
+        tips.append((95, "when a chat has clearly lost the thread, start a new one and open it with the "
+                         "decision written down, instead of asking the same thing again in the old thread"))
     if tools and tools / user >= 2:
-        tips.append((90, f"ask for smaller helpings ({tools:,} tool results for {user:,} "
-                         f"instructions): \"only the matching lines\" or \"only that one file\" "
-                         f"instead of a full dump, because every later turn re-reads whatever came "
-                         f"back"))
+        tips.append((90, "ask for smaller helpings (\"only the matching lines\", \"only that one "
+                         "file\") instead of letting a tool dump everything into the chat, because "
+                         "every later turn re-reads that dump"))
     if reason_share >= 25:
-        tips.append((85, f"put the right model on the job: {reason_share:.0f}% of what you pay for is "
-                         f"the model thinking to itself, so keep the thinking model for the hard "
-                         f"turns and move routine edits to a cheaper one (Model board)"))
+        tips.append((85, "keep the thinking model for the hard turns and move the routine edits to a "
+                         "cheaper one (Model board): most of what you pay for there is the model "
+                         "reasoning, not the answer"))
     if hit and hit < 60:
-        tips.append((80, f"make the reusable part really reusable (cache hit rate {hit:.0f}%): the "
-                         f"cache is the provider keeping text it already read so you pay a fraction "
-                         f"for it next time, and it only works when the beginning of the request "
-                         f"stays identical, so keep SOUL.md and the skills untouched mid-session and "
-                         f"put the changing request at the end"))
+        tips.append((80, "leave SOUL.md, the skills and the tone of your early messages alone "
+                         "mid-session, and put whatever changes at the end of the request: the cache "
+                         "can only reuse the opening while the opening stays the same"))
     elif hit >= 75:
-        tips.append((75, f"keep doing what you are doing on caching (hit rate {hit:.0f}%, meaning the "
-                         f"provider is reusing your prompt instead of charging full price for it): "
-                         f"the lever left is how much context you carry, not what it costs per word"))
+        tips.append((75, "caching is already doing its job, so the lever left is how much context you "
+                         "carry, not what it costs per word"))
     if int(pat.get("sessions_deep") or 0) >= 2 and int(pat.get("longest_session") or 0) >= 300:
-        tips.append((70, f"close long chats at milestones ({int(pat.get('longest_session') or 0):,} "
-                         f"messages in the deepest one): a new session costs one cache write and then "
-                         f"rides that cache, while an endless thread keeps paying to re-read itself"))
+        tips.append((70, "close long chats at milestones: a fresh session is cheap to start and then "
+                         "rides its own cache, while an endless thread keeps paying to re-read itself"))
     if int(pat.get("sessions_one") or 0) >= 2:
-        tips.append((65, f"bundle related questions ({_n(int(pat['sessions_one']), 'session')} had a "
-                         f"single instruction): a cold start pays full price for its first prompt, so five "
-                         f"related asks in one thread cost less than five fresh starts"))
+        tips.append((65, "bundle related asks into one thread: the first prompt of a new session is "
+                         "the expensive one"))
     if models_used >= 3:
-        tips.append((60, f"one model per thread ({_n(models_used, 'model')} appear in this history): "
-                         f"switching mid-session throws away the text the provider had cached"))
+        tips.append((60, "stick to one model per thread when you can: switching mid-session throws "
+                         "away what the provider had cached"))
     if int(pat.get("tiny") or 0) >= 3:
         tips.append((55, "write the finish line into the first message (\"done when X passes\"): "
                          "that is what removes the short keep-going nudges and the extra rounds they "
                          "cost"))
     if limit and per_call_prompt and 100.0 * per_call_prompt / limit >= 60:
-        tips.append((50, f"keep a normal turn well under the model's memory (this one already fills "
-                         f"{100.0 * per_call_prompt / limit:.0f}% of it): that is where summarising and "
-                         f"slow answers start"))
+        tips.append((50, "keep a normal turn well under the model's memory: that is where summarising "
+                         "and slow answers start"))
     if not tips:
-        tips.append((40, "honestly, nothing here looks wasteful: the mix of instructions, tool calls "
-                         "and cache reuse is what cheap agent work looks like, so keep the shape and "
-                         "just watch the trend"))
+        return ("If you take one thing from this: honestly, nothing here looks wasteful. The mix of "
+                "instructions, tool calls and cache reuse is what cheap agent work looks like, so keep "
+                "the shape and just watch the trend.")
     tips.sort(key=lambda t: -t[0])
-    balance = ("Two dials here, and they do different jobs: the cache decides what a word of context "
-               "costs you (it reuses text the provider already read, at a fraction of the price), and "
-               "the size of your context decides how many words you are paying for. ")
     if hit >= 75:
-        balance += (f"With a {hit:.0f}% hit rate the price dial is already turned the right way, so "
-                    f"the next win is volume.")
+        # The healthy-cache tip above already says this; repeating it in the closing line made the
+        # paragraph argue with itself.
+        balance = ("Nothing about the price of a word is worth your attention here, so spend the "
+                   "effort on what you carry instead.")
     elif hit and hit < 60:
-        balance += (f"With a {hit:.0f}% hit rate the price dial is still costing you money, and that "
-                    f"is usually the cheaper half to fix first.")
+        balance = ("Caching is the cheaper half to fix first, and the paragraph above says why it is "
+                   "low.")
     else:
-        balance += "Both dials are worth a look, and the numbers above say which one is louder."
-    return "What actually to do: " + "; ".join(t[1] for t in tips[:4]) + ". " + balance
+        balance = "Both dials are worth a look, and the paragraphs above say which one is louder."
+    # Sentences, not a semicolon chain: the tips are already full clauses, and a colon inside a tipped
+    # list read like a syntax error in prose.
+    # Lower case, semicolons: these read as advice, and no tip carries a colon of its own (the
+    # parentheses do that job now).
+    closing = "If you change one habit, make it this: " + "; ".join(t[1] for t in tips[:2]) + ". "
+    if len(tips) > 2:
+        closing += "Next in line: " + "; ".join(t[1] for t in tips[2:4]) + ". "
+    return closing + balance
 
 
 def usage_summary(report: dict, patterns: dict | None = None, cache: dict | None = None) -> list[str]:
@@ -5748,7 +5741,6 @@ def usage_summary(report: dict, patterns: dict | None = None, cache: dict | None
     cached = int(t.get("cache_read") or 0)
     reason = int(t.get("reasoning") or 0)
     days = report.get("days") or []
-    busy = _active_days(days)
     window = len(days) or USAGE_DAYS
     models = report.get("models") or []
     active = report.get("active_model") or "-"
@@ -5758,52 +5750,36 @@ def usage_summary(report: dict, patterns: dict | None = None, cache: dict | None
     prompt = fresh + cached
     hit = 100.0 * cached / prompt if prompt else 0.0
     per_call_prompt = prompt / calls if calls else 0
-    per_call_out = output / calls if calls else 0
-    per_session = total / sessions if sessions else 0
-    per_day = total / len(busy) if busy else 0
     out_share = 100.0 * output / total if total else 0.0
     reason_share = 100.0 * reason / output if output else 0.0
     top = models[0] if models else {}
     limit = int(top.get("context_limit") or 0)
     est = t.get("est_usd")
-    # A rough yardstick anyone can picture: about 750,000 words (call it seven novels) per million
-    # tokens, which is the usual rule of thumb for English text.
-    novels = total / 1e6 * 7
 
-    p1 = (f"Let us start with the size of it: {project} was billed for {_tok_text(total)} tokens in the "
-          f"last {window} days, where a token is a few characters of text (a rough rule of thumb: "
-          f"about 750,000 words per million tokens). Rounded off, that is around {novels:.0f} "
-          f"novels' worth: {_tok_text(fresh)} of text the model had to read fresh, plus "
-          f"{_tok_text(output)} that it wrote back.")
-    p1 += (f" That is only half the story, because a chat re-reads the same text on every turn: on top "
-           f"of the billed tokens it read {_tok_text(cached)} more straight from the provider's "
-           f"cache, which is the copy the provider keeps of text it has already seen. That is the "
-           f"{hit:.0f}% hit rate the Cache tab reports, and the reason this bill is not several "
-           f"times bigger. All of it took {calls:,} round trips to the model in "
-           f"{_n(sessions, 'session')}, about {_tok_text(per_session)} tokens per session over "
-           f"{_n(len(busy), 'active day')}, roughly {_tok_text(per_day)} tokens on a busy day.")
+    # Paragraph one stays technical, but with the few figures that carry the argument: how much was
+    # billed, how it splits, and what it costs. The rest belongs in the tables, not in a sentence
+    # nobody can skim.
+    p1 = (f"In numbers, and only the ones that matter: {project} was billed for {_tok_text(total)} "
+          f"tokens in the last {window} days, split between {_tok_text(fresh)} of context the model "
+          f"had to read as new text and {_tok_text(output)} that it wrote back. A chat re-reads its "
+          f"own text on every turn, so the billed tokens are only part of the reading: the rest came "
+          f"straight from the provider's cache, the copy it keeps of text it has already processed. "
+          f"The Cache tab prints that hit rate; what it buys you is a bill that is not several times "
+          f"bigger.")
     if top.get("model") and top["model"] != active:
-        p1 += (f" The model doing the heavy lifting is {top['model']} ({_pct(top.get('total'), total)} "
-               f"of the tokens), while the project is set to {active} today.")
+        p1 += (f" The model doing the heavy lifting is {top['model']}, while the project is set to "
+               f"{active} today.")
     elif top.get("model"):
         p1 += (f" That model, {top['model']}, is also the one the project is set to, so this is your "
                f"current baseline.")
     if report.get("previous_models"):
-        p1 += (f" {_n(len(report['previous_models']), 'other model')} show up in older sessions, so part "
-               f"of this history was made at different prices.")
+        p1 += " Other models show up in older sessions, so part of this history was made at different prices."
     if est is None:
         p1 += (" There is no cost estimate here: the price table has no row for at least one model "
                "used, so only the token counts are comparable.")
     else:
-        p1 += (f" At list prices that is about {_usd_text(est)}"
-               + (f", or roughly ${est / calls:.4f} per round trip" if calls else "")
-               + ", an estimate built from third-party price tables rather than an invoice.")
-    p1 += (f" An average round trip reads {_tok_text(per_call_prompt)} tokens of context and writes "
-           f"{_tok_text(per_call_out)}.")
-    if limit and per_call_prompt:
-        p1 += (f" For scale: the model holds about {_tok_text(limit)} tokens in one go (its context "
-               f"window), so a normal turn fills {100.0 * per_call_prompt / limit:.0f}% of that "
-               f"memory before it starts summarising the old part of the chat.")
+        p1 += (f" At list prices that is about {_usd_text(est)}, an estimate built from third-party "
+               f"price tables rather than an invoice.")
 
     p2 = _operator_paragraph(patterns, total, project, calls)
     p3 = _agent_paragraph(patterns, reason_share, out_share)
@@ -5813,19 +5789,19 @@ def usage_summary(report: dict, patterns: dict | None = None, cache: dict | None
         early, late, overall = _hit_rate_from_days(cache_row.get("days") or [])
         write = int((cache_row.get("totals") or {}).get("cache_write") or 0)
         if overall:
+            # No figures in these sentences either: the point is the behaviour behind them, and the
+            # Cache tab already prints the numbers.
             trend = ""
             if early and late and abs(late - early) >= 8:
-                trend = (f", moving from {early:.0f}% early on to {late:.0f}% later, so the reusable "
-                         f"part got " + ("steadier" if late > early else "less stable")
-                         + " as the work went on")
-            rows.append(f"{overall:.0f}% of the context the model read was served from the cache "
-                        f"instead of being charged as new text{trend}")
+                trend = (" It got " + ("steadier" if late > early else "less stable")
+                         + " as the work went on, which is what editing the opening mid-chat does to it.")
+            rows.append("most of the context the model read came back from the cache instead of being "
+                        "charged as new text." + trend)
         if write and cached and write / max(1, cached) >= 0.2:
-            rows.append(f"the cache was rebuilt often ({_tok_text(write)} tokens stored against "
-                        f"{_tok_text(cached)} reused), so the reusable opening of the request keeps "
-                        f"changing")
+            rows.append("the cache was rebuilt often, so the reusable opening of the request keeps "
+                        "changing")
     if rows:
-        p3 += " On caching, in plain terms: " + "; ".join(rows) + "."
+        p3 += " On caching, in plain terms: " + "; ".join(r.rstrip(".") for r in rows) + "."
     p4 = _playbook(patterns, hit=hit, out_share=out_share, reason_share=reason_share, total=total,
                    per_call_prompt=per_call_prompt, limit=limit, models_used=len(models))
     return [p1, p2 or p1, p3, p4]
@@ -5851,10 +5827,9 @@ def cache_summary(cache: dict, patterns: dict | None = None) -> list[str]:
     if not prompt and not write:
         return [f"{project} has no prompt-cache traffic recorded yet: every call so far was a single "
                 f"prompt with no reusable opening, so there was nothing for the provider to keep."]
-    p1 = (f"Short version: the provider's cache answered {hit}% of this project's reading in the last "
-          f"{window} days. In numbers, {_tok_text(cached)} of {_tok_text(prompt)} context tokens were "
-          f"text it had already read and could reuse cheaply, while {_tok_text(fresh)} had to be sent "
-          f"as new text, across {calls:,} round trips in {_n(sessions, 'session')}.")
+    p1 = (f"In numbers: {hit}% of this project's reading in the last {window} days came back from the "
+          f"provider's cache, which is text it had already processed and could hand back cheaply; the "
+          f"{_tok_text(fresh)} that had to be sent as new text is what the bill is built on.")
     if write:
         p1 += (f" It also stored {_tok_text(write)} tokens for later, "
                + ("which has no price row, so it is counted in tokens only."
@@ -5873,8 +5848,7 @@ def cache_summary(cache: dict, patterns: dict | None = None) -> list[str]:
     p2 = []
     if models:
         top = models[0]
-        p2.append(f"{_pct(top.get('cache_read'), cached)} of the reused text belongs to "
-                  f"{top.get('model')} across {_n(top.get('sessions'), 'session')}")
+        p2.append(f"practically all of the reused text belongs to {top.get('model')}")
     if early and late and abs(late - early) >= 8:
         p2.append(f"weighted by volume the hit rate went from {early:.0f}% in the first half of the "
                   f"window to {late:.0f}% in the second, "
@@ -5882,33 +5856,33 @@ def cache_summary(cache: dict, patterns: dict | None = None) -> list[str]:
                      "repeating" if late > early else
                      "which is what editing the instructions, SOUL.md or the skills mid-chat looks "
                      "like from the provider's side"))
+    # The percentage itself is in paragraph one and in the tables; here it is the behaviour that
+    # matters, so the same three bands are named in words.
     if hit >= 75.0:
-        p2.append(f"a hit rate of {hit:.0f}% means your opening stays stable: the system prompt, the "
-                  f"skills and the early turns of the chat are being reused instead of paid for again, "
-                  f"which is the cheapest your context can be")
+        p2.append("a hit rate this high means your opening stays stable: the system prompt, the skills "
+                  "and the early turns of the chat are reused instead of paid for again, which is the "
+                  "cheapest your context can be")
     elif hit >= 40.0:
-        p2.append(f"a hit rate of {hit:.0f}% is middling: part of the opening gets reused and part "
-                  f"keeps changing, which is what happens when a chat starts long and then gets "
-                  f"edited along the way")
+        p2.append("a middling hit rate means part of the opening gets reused and part keeps changing, "
+                  "which is what happens when a chat starts long and then gets edited along the way")
     else:
-        p2.append(f"a hit rate of {hit:.0f}% is low: the provider can hardly reuse anything, so short "
-                  f"sessions, a changed system prompt, or big tool results landing before the "
-                  f"reusable part are the first suspects")
+        p2.append("a hit rate this low means the provider can hardly reuse anything, so short sessions, "
+                  "a changed system prompt, or big tool results landing before the reusable part are "
+                  "the first suspects")
     pat = patterns or {}
     if pat.get("user_msgs"):
-        p2.append(f"the habit behind it: {_n(int(pat['user_msgs']), 'instruction')} over "
-                  f"{_n(int(pat.get('sessions') or 0), 'session')}"
-                  + (", one of them a session with a single instruction"
-                     if int(pat.get("sessions_one") or 0) == 1 else
-                     f", {_n(int(pat['sessions_one']), 'session')} with a single instruction"
-                     if int(pat.get("sessions_one") or 0) > 1 else "")
-                  + (f", {_n(int(pat['repeat_msgs']), 'message')} re-sent word for word"
-                     if pat.get("repeat_msgs") else "")
-                  + (f", the deepest chat at {int(pat['longest_session']):,} messages"
-                     if int(pat.get("longest_session") or 0) >= 150 else ""))
+        habits = []
+        if int(pat.get("sessions_one") or 0) >= 1:
+            habits.append("some sessions are a single question")
+        if pat.get("repeat_msgs"):
+            habits.append("some messages were re-sent word for word")
+        if int(pat.get("longest_session") or 0) >= 150:
+            habits.append("one chat ran long enough to be squeezed into a summary")
+        p2.append("the habit behind it: instructions fired across "
+                  + ("a handful of sessions" if int(pat.get("sessions") or 0) <= 12 else "many sessions")
+                  + (", " + ", ".join(habits) if habits else ""))
     if len(models) >= 2:
-        p2.append(f"{_n(len(models), 'model')} appear in this history, and every switch starts the "
-                  f"cache over")
+        p2.append("more than one model appears in this history, and every switch starts the cache over")
     if unpriced:
         p2.append(f"the dollar columns cover the priced models only: no price row for "
                   f"{', '.join(unpriced)}")
@@ -5926,7 +5900,6 @@ def overview_summary(over: dict, patterns: dict | None = None,
     projects = over.get("projects") or []
     models = over.get("models") or []
     days = over.get("days") or []
-    busy = _active_days(days)
     window = len(days) or USAGE_DAYS
     total = int(t.get("total") or 0)
     calls = int(t.get("calls") or 0)
@@ -5938,7 +5911,6 @@ def overview_summary(over: dict, patterns: dict | None = None,
     if not total and not calls:
         return ["No project has recorded model usage yet, so there is nothing to analyse. The numbers "
                 "appear as soon as a session reports its first tokens."]
-    per_day = total / len(busy) if busy else 0
     top_p = max(projects, key=lambda p: int(p.get("total") or 0)) if projects else {}
     top_m = models[0] if models else {}
     top_day = max(days, key=lambda d: int(d.get("total") or 0), default={})
@@ -5946,20 +5918,16 @@ def overview_summary(over: dict, patterns: dict | None = None,
     reason_share = 100.0 * reason / output if output else 0.0
     hit = 100.0 * cached / (fresh + cached) if (fresh + cached) else 0.0
     novels = total / 1e6 * 7
-    p1 = (f"All projects together: {_tok_text(total)} tokens in the last {window} days, or roughly "
-          f"{novels:.0f} novels' worth of text read and written, and that is the part you get billed "
-          f"for: {_tok_text(fresh)} of fresh reading plus {_tok_text(output)} of the model's own "
-          f"writing. On top of the billed tokens, the models read another {_tok_text(cached)} straight "
-          f"from the provider's cache (the copy kept of text they had already seen, which is why the "
-          f"hit rate is {hit:.0f}%). That came from {calls:,} round trips over "
-          f"{_n(sessions, 'session')}, on {_n(len(busy), 'active day')} at about {_tok_text(per_day)} "
-          f"tokens a day.")
+    p1 = (f"All projects together: {_tok_text(total)} tokens in the last {window} days, and that is "
+          f"the part you get billed for, split between {_tok_text(fresh)} of fresh reading and "
+          f"{_tok_text(output)} of the model's own writing. On top of it the models read another "
+          f"{_tok_text(cached)} straight from the provider's cache, the copy kept of text they had "
+          f"already seen, which is why the fleet-wide bill is not several times bigger.")
     if top_p.get("project"):
-        p1 += (f" {top_p['project']} eats {_pct(top_p.get('total'), total)} of it, and "
-               f"{top_m.get('model') or 'the top model'} handles {_pct(top_m.get('total'), total)} of "
-               f"everything by itself.")
+        p1 += (f" {top_p['project']} takes the largest share of it, and "
+               f"{top_m.get('model') or 'the most used model'} does most of the work by itself.")
     if top_day.get("day"):
-        p1 += f" The heaviest single day was {top_day['day']} at {_tok_text(top_day.get('total'))}."
+        p1 += f" The heaviest single day was {top_day['day']}."
     if t.get("est_usd") is not None:
         p1 += (f" Estimated at list prices: about {_usd_text(t.get('est_usd'))} for the window, built "
                f"from third-party price tables rather than an invoice.")

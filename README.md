@@ -223,6 +223,11 @@ docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
 - Port already in use: `herman web --port 9121`.
 - `gateway: stopped` on a project: no messaging gateway (Telegram, Discord, ...) runs for it. Harmless.
 - A session is stuck: `herman kill <project>`, or `herman kill <project> <session-id>`.
+- The Hermes dashboard at `127.0.0.1:9119` shows nothing: nothing is listening there. herman's
+  **Open dashboard** button (in Maintenance) starts it on demand; to keep it up without clicking, run
+  the engine as a user service: `cp hermes-dashboard.service ~/.config/systemd/user/ &&
+  systemctl --user enable --now hermes-dashboard.service` (check the `ExecStart` path against
+  `which hermes` first).
 
 ## Keeping your data out of the history
 

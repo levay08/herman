@@ -1,0 +1,21 @@
+[Unit]
+Description=Hermes Agent web dashboard (local, 127.0.0.1:9119)
+Documentation=https://hermes-agent.nousresearch.com/docs
+After=default.target
+
+[Service]
+Type=simple
+# The engine's own dashboard: herman's panel has an "Open dashboard" button that starts it on demand,
+# and this unit keeps it up without anyone clicking. Replace %h/.hermes/hermes-agent/venv/bin/hermes
+# with your own `which hermes` path if the engine lives elsewhere.
+ExecStart=%h/.hermes/hermes-agent/venv/bin/hermes dashboard --port 9119 --no-open --skip-build
+Restart=on-failure
+RestartSec=3
+# The dashboard starts helpers of its own; keep them out of the kill decision, so restarting the
+# dashboard never takes them down with it (the same reason herman-web.service uses KillMode=process).
+KillMode=process
+StandardOutput=append:%h/.cache/herman/dashboard.log
+StandardError=append:%h/.cache/herman/dashboard.log
+
+[Install]
+WantedBy=default.target
