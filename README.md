@@ -157,7 +157,14 @@ herman web
 
 Serves `127.0.0.1:9120` and prints a URL carrying a random token. The sidebar keeps **Open projects**
 (and the project count) right under the dashboard button, for the way back to the board. The token is exchanged for an
-`HttpOnly` cookie on first load, so it does not stay in your address bar, history or link referrers.
+`HttpOnly`, `SameSite=Strict` cookie on first load, so it does not stay in your address bar, history
+or link referrers. That cookie is the tab's session: it lives for 400 days and is renewed on every
+page load, and the token survives restarts (only `herman web --new-token` rotates it), so a tab left
+open overnight, or a browser restarted in between, comes back with a plain refresh. A tab that lost
+the cookie anyway (cleared site data, rotated token) is answered with a short "this tab lost its
+panel session" page instead of a JSON error, and it first tries the copy of the token the page keeps
+in that origin's `localStorage`; when that fails too, the taskbar icon or `herman web --url` is the
+way back.
 
 - **Dashboard** all-project overview plus total token usage
 - **Projects** three cards per row, one card per project (model, workdir, skills, memory, live session),
@@ -231,6 +238,9 @@ docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
 
 - `herman: command not found`: add `~/.local/bin` to your `PATH`.
 - The panel looks stale after an upgrade: `herman web --stop && herman web` (Python is kept in memory).
+- A tab says its panel session ended: the token was rotated (`herman web --new-token`), or that
+  browser's site data was cleared. Reopen the panel from the taskbar icon, or from
+  `herman web --url`.
 - Port already in use: `herman web --port 9121`.
 - `gateway: stopped` on a project: no messaging gateway (Telegram, Discord, ...) runs for it. Harmless.
 - A session is stuck: `herman kill <project>`, or `herman kill <project> <session-id>`.

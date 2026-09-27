@@ -1466,7 +1466,7 @@
         <div class="boot-title" id="boot-title">Opening session</div>
         <div class="boot-sub" id="boot-sub">starting up…</div>
         <div class="boot-bar" aria-hidden="true"><i></i></div>
-        <div class="boot-note">Escape or click to hide this · the session keeps starting.</div>
+        <div class="boot-note" id="boot-note">Escape or click to hide this · the session keeps starting.</div>
       </div>
     </div>
 
@@ -1491,6 +1491,13 @@
 <script>
 const TOKEN = "{{TOKEN}}";
 const PAGE_REV = "{{REV}}";
+/* Keep the token this tab was served with in this origin only. The cookie that carries it is
+   HttpOnly, so without this copy a tab whose cookie was dropped (expired, or cleared by the browser
+   on exit) could never restore its own session: the "lost its panel session" page that the server
+   answers a token-less refresh with reads this and asks for the page again WITH the token, which is
+   how a fresh cookie is handed out. Clearing this origin's site data removes it too, and then the
+   taskbar icon is the way back. */
+try { localStorage.setItem('herman.token', TOKEN); } catch (e) {}
 const DEFAULT_PROJECT = 'default';     // the root profile: tinted so it stands apart from clones
 const out = document.getElementById('out');
 const statusEl = document.getElementById('status');
@@ -1499,6 +1506,34 @@ const progress = document.getElementById('progress');
 let src = null, timer = null, started = 0, lastAction = '', projects = [], focusProject = '', dashInfo = {};
 
 const v = id => (document.getElementById(id).value || '').trim();
+/* Every panel call carries the token in its URL, so a 403 means the server no longer accepts this
+   tab's token (it was rotated with `herman web --new-token`): say so once, stop the poll loop and
+   name the one way back, instead of letting every board render an empty view. */
+let tokenDead = false;
+(function(){
+  const inner = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await inner(...args);
+    if (res.status === 403 && !tokenDead){
+      tokenDead = true;
+      try { localStorage.removeItem('herman.token'); } catch (e) {}
+      sessionEnded();
+    }
+    return res;
+  };
+})();
+function sessionEnded(){
+  /* Reuses the session overlay: it is already a full-window card that Escape dismisses. */
+  setStatus('error', 'Panel session ended · reopen the panel from the taskbar icon');
+  const el = bootEl();
+  if (!el) return;
+  document.getElementById('boot-title').textContent = 'Panel session ended';
+  document.getElementById('boot-sub').textContent =
+    "This tab's token is not valid any more (it was rotated). Click the herman icon on the taskbar, " +
+    'or run `herman web --url` and open the URL it prints.';
+  document.getElementById('boot-note').textContent = 'Escape or click to hide this.';
+  el.hidden = false;
+}
 /* Icon markup for the vendored sprite (see icons.svg): every glyph in this page is an <svg><use>
    reference, so nothing renders as a font-dependent emoji and no remote request is made. */
 function icon(name, cls){ return '<svg class="bi' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + name + '"></use></svg>'; }
@@ -1755,7 +1790,7 @@ async function fetchLive(){
   }catch (e) { return null; }   /* panel still fine, try again next tick */
 }
 async function pollLive(){
-  if (document.hidden) return;
+  if (document.hidden || tokenDead) return;
   await fetchLive();
 }
 
@@ -4232,6 +4267,10 @@ async function syncNow(){
   pruneUiState();
   const u = new URL(location.href);
   u.searchParams.set('v', String(Date.now()));      // a fresh URL defeats any cached copy
+  /* Carry the token as well: the reload then renews the session cookie, so a tab whose cookie was
+     dropped comes back through the same redirect instead of landing on the "lost its session" page.
+     With a token that is already dead the flag is the only honest URL: that page says what to do. */
+  if (tokenDead) u.searchParams.delete('t'); else u.searchParams.set('t', TOKEN);
   setStatus('done', verdict ? 'Synced: ' + verdict : 'Synced · reloading');
   setTimeout(() => location.replace(u.toString()), verdict ? 900 : 150);
 }
@@ -4734,6 +4773,7 @@ function bootShow(name){
   bootShownAt = Date.now();
   document.getElementById('boot-title').textContent = 'Opening session';
   document.getElementById('boot-sub').textContent = 'requesting a terminal window for ' + name + '…';
+  document.getElementById('boot-note').textContent = 'Escape or click to hide this · the session keeps starting.';
   bootEl().hidden = false;
 }
 function bootMsg(text){ document.getElementById('boot-sub').textContent = text; }

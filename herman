@@ -177,6 +177,13 @@ HERMAN_SHARE = Path.home() / ".local" / "share" / PROG
 STATE_FILE = HERMAN_CACHE / "state.json"
 TOKEN_FILE = HERMAN_CACHE / "web-token"
 COOKIE_NAME = "herman_session"          # the token, once, as an HttpOnly cookie
+# The cookie is the only credential a browser tab holds after the first load (the token itself is
+# stripped from the URL by the redirect), so it has to outlive the tab: it used to be 8 hours, which
+# meant a tab left open overnight came back to "token required" and could not be recovered by a
+# refresh - the token was already gone from the address bar, so only reopening the panel URL worked.
+# The token file never expires, so the cookie that carries it is given the browser's own cap (400
+# days) and renewed on every page load; `herman web --new-token` is what ends sessions early.
+COOKIE_MAX_AGE = 400 * 86400
 MAX_BODY = 256 * 1024                   # panel request bodies are small JSON blobs
 CATALOG_FILE = HERMAN_SHARE / "models-local.json"   # optional user data: never commit this
 CATALOG_CACHE = HERMAN_CACHE / "models-cache.json"
@@ -2093,6 +2100,8 @@ ENTER & SELECT (long spellings, same thing)
   {PROG} web --status                 live panels with the full clickable url
   {PROG} web --url                    print the full url only (script friendly)
   {PROG} web --stop [--port N]        stop one panel, or all of them
+  {PROG} web --new-token              rotate the token: every open tab must be reopened (the
+                                      session cookie lives for 400 days otherwise)
 
 {bold("MISC")}
   {PROG} completion install    install shell completion (bash/zsh)
@@ -2743,6 +2752,19 @@ def ensure_token() -> str:
     return tok
 
 
+def read_token() -> str:
+    """The panel token as it is on disk right now, created if the file is missing.
+
+    The server reads it per request instead of holding it for its lifetime, so `herman web
+    --new-token` ends the open sessions at once rather than at the next restart.
+    """
+    try:
+        tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        tok = ""
+    return tok or ensure_token()
+
+
 def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -3040,6 +3062,62 @@ def shape_error(key: str, value: str, rule: dict) -> str:
     return " · ".join(parts)
 
 
+LOST_SESSION_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>herman panel · session</title>
+<style>
+  :root{color-scheme:dark light}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1115;color:#e6e8ee;
+       font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .card{max-width:37rem;margin:2rem;padding:1.5rem 1.7rem;border:1px solid #2a2f3a;border-radius:12px;
+        background:#161920}
+  h1{margin:0 0 .5rem;font-size:1.12rem}
+  p{margin:.65rem 0}
+  ol{margin:.5rem 0 .2rem 1.15rem;padding:0}
+  li{margin:.3rem 0}
+  code{padding:.08rem .34rem;border:1px solid #2a2f3a;border-radius:5px;background:#0f1115;
+       font:.92em ui-monospace,SFMono-Regular,Menlo,monospace}
+  .dim{color:#9aa3b2;font-size:.9em}
+  button{margin-top:.9rem;font:inherit;padding:.45rem .95rem;border-radius:9px;cursor:pointer;
+         border:1px solid #3b4353;background:#222836;color:inherit}
+</style>
+<script>
+  /* The dashboard stored the token it was served with in THIS origin's localStorage, so a tab that
+     only lost its cookie (it expired, or the browser dropped it) still has a way back. The server
+     wants the token from the URL to hand out a fresh cookie, which is exactly this reload. When the
+     URL already carries a token, that one was refused: forget it and fall through to the
+     instructions, so a rotated token cannot loop forever. */
+  (function () {
+    var tried = /(^|[?&])t=/.test(location.search);
+    var tok = '';
+    try { tok = localStorage.getItem('herman.token') || ''; } catch (e) { tok = ''; }
+    if (tried) { try { localStorage.removeItem('herman.token'); } catch (e) {} return; }
+    if (tok) location.replace(location.pathname + '?t=' + encodeURIComponent(tok));
+  })();
+</script>
+</head>
+<body>
+  <div class="card">
+    <h1>This tab lost its panel session</h1>
+    <p>The panel is answering, but this tab no longer holds its token: the session cookie expired or
+       was cleared, or the token was rotated with <code>herman web --new-token</code>.</p>
+    <p>Open the dashboard again:</p>
+    <ol>
+      <li>click the herman icon on the taskbar (it opens a tab that carries the token), or</li>
+      <li>in a terminal run <code>herman web --url</code> and open the URL it prints.</li>
+    </ol>
+    <p class="dim">Either way it is this browser that keeps the session, so a tab reopened from the
+       icon (or from that URL) stays signed in.</p>
+    <button onclick="location.reload()">Reload this page</button>
+  </div>
+</body>
+</html>
+"""
+
+
 def cmd_web(argv: list[str]):
     port = DEFAULT_WEB_PORT
     host = "127.0.0.1"
@@ -3075,6 +3153,20 @@ def cmd_web(argv: list[str]):
             sys.exit(1)
         print(panel_url(panels[0]))
         return
+    if "--new-token" in argv:
+        # Rotation is the one thing that ends a browser session early: the cookie now lives for
+        # months, so an operator who thinks the token leaked needs a command that invalidates every
+        # open tab, not a restart (the token survives restarts on purpose).
+        harden_cache()
+        TOKEN_FILE.write_text(secrets.token_urlsafe(24), encoding="utf-8")
+        chmod_quiet(TOKEN_FILE)
+        print(green("✓ ") + "new panel token written")
+        print(dim(f"  token  : {TOKEN_FILE}"))
+        for p in list_panels():
+            print(dim(f"  panel on port {p['port']} picks it up on the next request (no restart)"))
+        print(amber("  every open dashboard tab now says its session ended: reopen it from the "
+                    "taskbar icon"))
+        return
     if "--stop" in argv:
         want = port if "--port" in argv else None
         panels = [x for x in list_panels() if want is None or x["port"] == want]
@@ -3091,9 +3183,10 @@ def cmd_web(argv: list[str]):
         return
 
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from urllib.parse import urlparse, parse_qs
+    from urllib.parse import urlparse, parse_qs, urlencode
 
-    token = ensure_token()
+    ensure_token()          # the file must exist before the first request; the printed URL and every
+                            # request read it from disk, so a rotation lands without a restart
     page = html_path()
     if not page.exists():
         die(f"panel page not found: {page} (reinstall {PROG})")
@@ -3133,6 +3226,46 @@ def cmd_web(argv: list[str]):
                     return value
             return ""
 
+        def _token(self) -> str:
+            """The live token, read per request: a rotation ends the open sessions at once."""
+            return read_token()
+
+        def _session_cookie(self) -> tuple[str, str]:
+            return ("Set-Cookie", f"{COOKIE_NAME}={self._token()}; HttpOnly; SameSite=Strict; "
+                                 f"Path=/; Max-Age={COOKIE_MAX_AGE}")
+
+        def _lost_session_page(self):
+            """What a browser tab gets when it has no valid token, instead of a JSON blob.
+
+            A refresh in a tab whose cookie is gone used to answer `{"error": "token required"}`, which
+            reads like a broken panel; the page explains the one thing that happened and the way back.
+            Only navigations (Accept: text/html) see it: scripts, curl and the security battery keep
+            getting JSON.
+            """
+            data = LOST_SESSION_PAGE.encode()
+            self.send_response(403)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                return
+
+        def _wants_page(self) -> bool:
+            """Is this a browser asking for the panel page itself (not an API or a command line call)?
+
+            A navigation is recognised by `Sec-Fetch-Mode: navigate` (every current browser sends it on
+            a top-level navigation, including a refresh) or by an `Accept` that asks for HTML. A fetch
+            from the page, curl and the security battery match neither, so they keep getting JSON.
+            """
+            accept = (self.headers.get("Accept") or "").lower()
+            mode = (self.headers.get("Sec-Fetch-Mode") or "").lower()
+            if self.headers.get("X-Herman-Token"):
+                return False
+            return mode == "navigate" or "text/html" in accept
+
         def _same_origin(self) -> bool:
             """Refuse cross-site browsers and DNS-rebinding hosts before any route body runs.
 
@@ -3165,7 +3298,7 @@ def cmd_web(argv: list[str]):
 
         def _auth(self, q) -> bool:
             given = q.get("t", [""])[0] or self.headers.get("X-Herman-Token") or self._cookie_token()
-            return bool(given) and secrets.compare_digest(str(given), token)
+            return bool(given) and secrets.compare_digest(str(given), self._token())
 
         def _json(self, obj, code: int = 200):
             body = json.dumps(obj, ensure_ascii=False).encode()
@@ -3225,30 +3358,38 @@ def cmd_web(argv: list[str]):
                 self.end_headers()
                 return
             if not self._auth(q):
+                if u.path in ("/", "/index.html") and self._wants_page():
+                    self._lost_session_page()
+                    return
                 self._json({"error": "token required; open the URL printed by "
                                      f"`{PROG} web`"}, 403)
                 return
             if u.path in ("/", "/index.html") and (q.get("t", [""])[0] or ""):
                 # The token arrived in the URL: put it in an HttpOnly, SameSite=Strict cookie and
                 # redirect to the same path without it, so it never sits in the address bar, the
-                # browser history or the Referer of any link the page opens.
+                # browser history or the Referer of any link the page opens. The other query
+                # parameters (the `v=` cache buster the page's own reload adds) are kept.
+                rest = urlencode([(k, v) for k, vs in q.items() if k != "t" for v in vs])
                 self.send_response(302)
-                self.send_header("Location", u.path)
-                self.send_header("Set-Cookie", f"{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; "
-                                               f"Path=/; Max-Age=28800")
+                self.send_header("Location", u.path + (f"?{rest}" if rest else ""))
+                self.send_header(*self._session_cookie())
                 self.send_header("Content-Length", "0")
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return
             if u.path in ("/", "/index.html"):
                 body = icon_refs(page.read_text(encoding="utf-8")                  \
-                .replace("{{TOKEN}}", token).replace("{{REV}}", page_rev())        \
+                .replace("{{TOKEN}}", self._token()).replace("{{REV}}", page_rev()) \
                 .replace("{{ICONS}}", icons_sprite()))
                 data = body.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "no-store")
+                if not q.get("t") and self._cookie_token():
+                    # Sliding expiry: every page load pushes the cookie's Max-Age out again, so a tab
+                    # that is used now and then, or restored after a reboot, never falls off the end.
+                    self.send_header(*self._session_cookie())
                 self.end_headers()
                 self.wfile.write(data)
                 return
@@ -3797,7 +3938,7 @@ def cmd_web(argv: list[str]):
                                     "host": display_host(host), "bind": host}),
                         encoding="utf-8")
     chmod_quiet(pid_file)
-    url = f"http://{url_host(display_host(host))}:{port}/?t={token}"
+    url = f"http://{url_host(display_host(host))}:{port}/?t={read_token()}"
     print_panel_ready({"pid": os.getpid(), "port": port, "host": display_host(host),
                        "url": f"http://{url_host(display_host(host))}:{port}/", "file": pid_file})
     sys.stdout.flush()

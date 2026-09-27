@@ -15,6 +15,7 @@ import http.client
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import sys
@@ -91,6 +92,26 @@ def main() -> int:
     st, _h, _b = call("GET", "/api/status", port=port, host=host,
                       headers={"Cookie": cookie.split(";")[0]})
     check("the cookie authenticates on its own", st, 200)
+
+    # ---- the browser session -------------------------------------------------------------------
+    # The cookie is the only credential a tab keeps after the first load, so it has to outlive a night
+    # with the tab open. It used to be 8 hours, and a refresh of an older tab then answered 403 with
+    # nothing to do about it; these checks keep that from coming back.
+    age = int((re.search(r"max-age=(\d+)", cookie, re.I) or [None, 0])[1] or 0)
+    check("the session cookie lasts at least 30 days", age >= 30 * 86400, True)
+    st, hdrs, _b = call("GET", "/", port=port, host=host,
+                        headers={"Cookie": cookie.split(";")[0]})
+    check("a page load answers the dashboard", st, 200)
+    check("a page load renews the cookie (sliding expiry)",
+          "max-age=" in (hdrs.get("set-cookie") or "").lower(), True)
+    st, hdrs, body = call("GET", "/", port=port, host=host, headers={"Accept": "text/html"})
+    check("a browser with no session gets a page, not a JSON error", st, 403)
+    check("that page is HTML", "text/html" in (hdrs.get("content-type") or ""), True)
+    check("that page can restore the session from the tab's own token",
+          b"herman.token" in body, True)
+    check("that page names the way back", b"herman web --url" in body, True)
+    st, _h, _b = call("GET", "/api/status", port=port, host=host)
+    check("a caller without a session still gets JSON", st, 403)
 
     # ---- origin and host --------------------------------------------------------------------
     st, _h, _b = call("GET", f"/api/status?t={token}", port=port, host=host,
