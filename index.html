@@ -202,6 +202,59 @@
   .logo-tagline a:hover{text-decoration:underline}
   .hero-meta{display:flex;flex-direction:column;gap:10px;max-width:330px}
   .hint{font-size:12.3px;color:var(--dim)}
+  /* ---------- self-update lock ---------- */
+  /* While herman replaces its own files the panel is locked: one progress card, everything behind
+     it inert, and no way out except the outcome. It unlocks by itself when the new panel answers. */
+  #upd-lock{position:fixed;inset:0;z-index:70;display:grid;place-items:center;
+            background:var(--scrim);backdrop-filter:blur(3px)}
+  #upd-lock[hidden]{display:none}
+  .upd-lock-card{width:min(92vw,540px);max-width:540px}
+  .upd-lock-card h3{margin:0 0 6px}
+  .upd-spinner{width:26px;height:26px;border-radius:50%;margin:0 0 10px;
+               border:3px solid var(--line-strong);border-top-color:var(--teal-btn);
+               animation:updspin .9s linear infinite}
+  @keyframes updspin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){ .upd-spinner{animation:none} }
+  body.upd-locked{overflow:hidden}
+  /* ---------- Insights > Last session (closed sessions) ---------- */
+  .last-list{display:grid;gap:6px;min-width:0}
+  /* A closed session is ONE compact row by default; the detail (prompt, result, tail button) is
+     revealed per entry, so a day with 100 closes stays scannable instead of one long scroll.
+     The row is a GRID with shrinkable tracks: fixed min-widths on flex children pushed the board
+     wider than its column (the excerpt could never shrink below its own text). */
+  .last-entry{border-left:3px solid var(--line-strong);padding:6px 10px;min-width:0;overflow:hidden}
+  .last-entry.fresh{border-left-color:var(--teal-btn)}
+  .last-entry.older{border-left-color:var(--warn-line)}
+  .last-row{display:grid;gap:8px;align-items:baseline;cursor:pointer;
+            grid-template-columns:12px minmax(58px,118px) 78px max-content
+                                  minmax(96px,190px) max-content minmax(0,1fr)}
+  .last-row > *{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .last-row .when{color:var(--dim);font-size:12px}
+  .last-row .sid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.6px;
+                 color:var(--dim2,var(--dim));text-align:left}
+  .last-row .ex{color:var(--dim);font-size:12.4px}
+  .last-row .caret{color:var(--dim);font-size:11px;transition:transform .12s ease}
+  .last-entry.open .last-row .caret{transform:rotate(90deg)}
+  .last-row:hover .ex{color:var(--text)}
+  .last-entry .detail{display:none}
+  .last-entry.open .detail{display:block}
+  .last-pager{justify-content:flex-start;margin:0}
+  /* Narrow window: drop the session id column rather than pushing the excerpt off the edge. */
+  @media (max-width:1180px){
+    .last-row{grid-template-columns:12px minmax(52px,96px) 72px max-content max-content minmax(0,1fr)}
+    .last-row .sid{display:none}
+  }
+  .last-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+  .last-head .who{font-weight:650}
+  .last-head .sid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dim)}
+  .last-block{margin-top:8px}
+  .last-block .lbl{font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--dim)}
+  .last-text{margin:4px 0 0;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-ctl);
+             background:var(--surface2);font-size:12.6px;white-space:pre-wrap;word-break:break-word;
+             max-height:9.5em;overflow:hidden}
+  .last-text.open{max-height:none}
+  /* The sessions a self-update has to stop first, listed inside that dialog. */
+  ul.upd-sessions{margin:6px 0 0;padding-left:18px;font-size:12.4px;color:var(--dim)}
   /* One setting, one line, inside its own table cell. The shared input rule is width:100%, and in a
      wrapping flex row (.btnrow) that pushed every Save button onto the line below: the chat rows came
      out three times taller than they needed to be and the labels stopped lining up with their inputs. */
@@ -496,6 +549,9 @@
   button.danger{background:none;border-color:var(--danger-line);color:var(--danger)}
   button.danger:hover{background:var(--danger-soft);border-color:var(--danger-line-strong)}
   button.tiny{min-height:30px;padding:5px 10px;font-size:12.2px}
+  /* A button that is not relevant yet (Update now, before a check found something newer) must be
+     gone, not merely inert: the UA rule is enough on most engines, this makes it explicit. */
+  button[hidden]{display:none}
   .btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
   /* ---------- theme slider ---------- */
@@ -710,7 +766,7 @@
  ███████║█████╗  ██████╔╝██╔████╔██║███████║██╔██╗ ██║
  ██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══██║██║╚██╗██║
  ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║██║  ██║██║ ╚████║
- ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝<span class="ver"> v0.4</span></pre>
+ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝<span class="ver"> v0.5</span></pre>
             </div>
             <div class="logo-tagline">hermes-agent · simple task manager<span id="tagline-repo"></span></div>
           </div>
@@ -948,6 +1004,7 @@
           <button class="subtab" data-sub="context" onclick="vtab('insights','context')">Context health</button>
           <button class="subtab" data-sub="cache" onclick="vtab('insights','cache')">Cache</button>
           <button class="subtab" data-sub="errors" onclick="vtab('insights','errors')">Errors</button>
+          <button class="subtab" data-sub="last" onclick="vtab('insights','last')">Last session</button>
         </div>
         <p class="note">Everything below is read read-only from the focus project's <code>state.db</code> and <code>logs/</code>: nothing is written, so it is safe to use while Hermes sessions are running.</p>
 
@@ -1059,6 +1116,25 @@
             <p class="hint" id="err-sum"></p>
             <div class="scrollx"><table id="err-table"></table></div>
           </div>
+        </div>
+
+        <div class="subpane" data-sub="last">
+          <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">Sessions that were closed</div>
+            <p class="hint" id="last-sum">…</p>
+            <div class="btnrow">
+              <button class="ghost" onclick="loadLastSessions(true)"
+                      title="Re-read the closed sessions from every project's state.db. Read-only: nothing is written.">Refresh</button>
+              <button class="ghost" id="last-mode" onclick="lastToggleMode()"
+                      title="Switch between one compact row per closed session (default, scannable) and every entry expanded.">Show all details</button>
+              <button class="ghost" onclick="lastExpandAll()"
+                      title="Open or close the full stored text inside the entries on this page.">Expand full text</button>
+            </div>
+            <div class="btnrow last-pager" id="last-pager-top"></div>
+            <p class="hint">A session that is still RUNNING has no "last" record yet — its transcript is still being written. Close the session (or its terminal) and it shows up here. Reads are read-only, so nothing on this board can damage a transcript.</p>
+          </div>
+          <div id="last-list" class="last-list"></div>
+          <div class="btnrow last-pager" id="last-pager-bottom"></div>
         </div>
       </section>
 
@@ -1313,6 +1389,17 @@
 
         <div class="subpane" data-sub="about">
           <div class="card pad">
+            <div class="subhead" style="margin-top:0;border-top:0;padding-top:0">herman itself</div>
+            <dl class="kv" id="upd-kv"></dl>
+            <div class="btnrow">
+              <button class="ghost" id="upd-check" onclick="checkUpdates()"
+                      title="Clones the repository herman ships from into a temp dir and compares its version with the one installed here. Nothing is written and no project is read.">Check for updates</button>
+              <button class="primary" id="upd-now" hidden onclick="openUpdateModal()"
+                      title="Install the published herman over this one. The typed confirmation comes first; live Hermes sessions are shown but keep running.">Update now</button>
+            </div>
+            <p class="hint" id="upd-note">herman updates itself: your projects, sessions, memory and skills are never part of it. Press Check for updates to compare this copy with the published one.</p>
+          </div>
+          <div class="card pad">
             <dl class="kv" id="about-kv"></dl>
           </div>
         </div>
@@ -1416,6 +1503,45 @@
       </div>
     </div>
 
+    <div class="modal" id="upd-modal" hidden>
+      <div class="modal-card card pad">
+        <h3>Update herman</h3>
+        <p class="hint" id="upd-lead">…</p>
+        <dl class="kv modal-kv" id="upd-info"></dl>
+        <div id="upd-sessions"></div>
+        <div class="create-form modal-form">
+          <div>
+            <label class="f" for="upd-confirm">Type "update" to confirm</label>
+            <input id="upd-confirm" autocomplete="off" spellcheck="false" maxlength="16"
+                   placeholder="update"
+                   title="The same word the CLI asks for. A mistyped, prefetched or accidental request can therefore never replace the installed copy.">
+            <p class="hint">Same guard as the CLI: the word <b>update</b>, typed by hand.</p>
+          </div>
+        </div>
+        <div class="btnrow modal-actions">
+          <button class="primary" id="upd-go" onclick="applyUpdate()"
+                  title="Installs the published copy of herman's own scripts and restarts the panel. Live Hermes sessions keep running; your projects and their data are not touched.">Continue and update</button>
+          <button class="ghost" onclick="closeModal('upd-modal')"
+                  title="Close this dialog and change nothing (Escape also closes it).">Cancel</button>
+        </div>
+        <button class="modal-x" onclick="closeModal('upd-modal')" aria-label="Close" title="Close this dialog (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
+      </div>
+    </div>
+
+    <div class="modal" id="last-modal" hidden>
+      <div class="modal-card card pad wide">
+        <h3 id="last-modal-head">Closed session</h3>
+        <p class="hint">Read read-only from this project's <code>state.db</code>. A session that is still running has no record here — close it (or its terminal) first.</p>
+        <dl class="kv modal-kv" id="last-modal-kv"></dl>
+        <div id="last-modal-body"></div>
+        <div class="btnrow modal-actions">
+          <button onclick="copyLastDetail()" title="Copy everything shown here to the clipboard.">Copy</button>
+          <button class="ghost" onclick="closeModal('last-modal')" title="Close this dialog (Escape also closes it).">Close</button>
+        </div>
+        <button class="modal-x" onclick="closeModal('last-modal')" aria-label="Close" title="Close this dialog (Escape also closes it)."><svg class="bi" aria-hidden="true"><use href="#i-x-lg"></use></svg></button>
+      </div>
+    </div>
+
     <div class="modal" id="src-modal" hidden>
       <div class="modal-card card pad">
         <h3>Where these numbers come from</h3>
@@ -1484,6 +1610,25 @@
       <div class="progress idle" id="progress"><i></i></div>
       <div class="dock-grip" id="dock-grip" title="Drag up to enlarge the output panel (double-click to reset)."></div>
       <pre id="out"><span class="out-empty">No action running. Progress and results appear here.</span></pre>
+    </div>
+  </div>
+</div>
+
+<!-- Self-update lock. It lives OUTSIDE .app so the app shell can be made inert while the lock is
+     up: during an update nothing on the panel may be clicked, and the lock itself stays live. -->
+<div id="upd-lock" hidden role="alertdialog" aria-live="assertive" aria-label="Updating herman">
+  <div class="card pad upd-lock-card">
+    <div class="upd-spinner" aria-hidden="true"></div>
+    <h3>Updating herman</h3>
+    <p class="hint" id="upd-lock-step">…</p>
+    <dl class="kv" id="upd-lock-kv"></dl>
+    <p class="hint">The panel is locked while herman replaces its own files, so nothing can change
+      underneath it. Your projects, sessions, memory and skills are not part of an update — they live
+      outside herman's own files. This tab keeps its session: it reloads itself, with its token, as
+      soon as the new panel answers.</p>
+    <div class="btnrow">
+      <button class="ghost" id="upd-lock-reload" hidden onclick="reloadPanel()"
+              title="Load the panel again. The token in this tab's address keeps the session open, so the same session comes back.">Reload the panel</button>
     </div>
   </div>
 </div>
@@ -1661,7 +1806,7 @@ const ROUTE_LOAD = {
   dashboard: () => refresh(),
   projects: () => refresh(),
   model: () => { loadFocus(); loadUsage(); },
-  insights: () => { loadInsights(); loadUsage(); },
+  insights: () => { loadInsightsBoard(); },
   // loadFocus() is what resolves the focus project, so the integration lists must wait for it: run
   // them side by side and the panes report "waiting for the project list" and stay empty.
   access: () => loadIntegrationsWhenReady(),
@@ -1752,8 +1897,303 @@ async function loadAbout(){
   } catch (e) { /* offline or older server: keep whatever the markup says */ }
 }
 
+/* ---------- herman's own version (Maintenance > About) ---------- */
+/* The panel compares the copy installed on this machine with the one published in the repo herman
+   ships from, and can install it. Both halves stay read-only until the operator types the word:
+   the check only clones into herman's own cache, and an update replaces herman's own files - the
+   projects, sessions, memory and skills under ~/.hermes are never written by either. */
+let updLast = null;          /* the last check result, as the server answered it */
+let updTimer = null;         /* polling timer while an update runs */
+const UPD_STEPS = {
+  starting: 'Starting the update…',
+  backup:   'Backing up the files that will be replaced…',
+  install:  'Installing the published copy…',
+  verify:   'Checking the installed copy…',
+  adapt:    'Bringing your data up to date with the new version…',
+  restart:  'Restarting the panel to load it…',
+  health:   'Waiting for the new panel to answer…',
+  done:     'Update finished.',
+  error:    'The update failed.',
+};
+function updTime(ts){
+  return ts ? new Date(ts * 1000).toLocaleTimeString() : 'not checked yet';
+}
+function renderUpdate(d){
+  updLast = d;
+  kv('upd-kv', [
+    ['installed', d.installed + '  ·  ' + d.script],
+    ['published', d.ok ? (d.latest + '  ·  rev ' + (d.rev || 'unknown')) : ('unknown  ·  ' + d.error)],
+    ['checked', updTime(d.checked_at) + (d.cached ? '  (cached)' : '')],
+    ['source', d.source],
+    ['panel', (d.panel && d.panel.unit ? d.panel.unit + '  ·  ' + d.panel.unit_state : 'no service')
+              + (d.panel && d.panel.running ? '  ·  pid ' + d.panel.pid : '  ·  not running')],
+  ]);
+  const now = document.getElementById('upd-now');
+  if (now) now.hidden = !d.update_available;
+  const note = document.getElementById('upd-note');
+  if (!note) return;
+  const live = (d.sessions || []).length;
+  if (d.update_available){
+    note.textContent = 'herman ' + d.latest + ' is published; this copy is ' + d.installed + '.'
+      + (live ? ' ' + live + ' live session(s) keep running through it — the dialog lists them.'
+              : ' No session is live, so it can start right away.');
+  } else if (!d.checked_at){
+    note.textContent = 'Not checked yet. herman updates itself — your projects, sessions, memory and '
+      + 'skills are never part of it. Press Check for updates to compare this copy (' + d.installed
+      + ') with the published one.';
+  } else if (d.ok){
+    note.textContent = 'Up to date: ' + d.installed + ' is what ' + d.source + ' publishes.';
+  } else {
+    note.textContent = 'Could not check the source: ' + d.error;
+  }
+}
+async function loadUpdate(cachedOnly){
+  /* Never asks the network on its own: the pane shows the cached verdict (or the markup's own
+     sentence) and only the button reaches the repo. */
+  try {
+    const d = await (await fetch('/api/update?t=' + TOKEN + (cachedOnly ? '&cached=1' : ''))).json();
+    if (d && d.installed) renderUpdate(d);
+  } catch (e) { /* offline or an older server: keep whatever the markup says */ }
+}
+async function checkUpdates(){
+  const b = document.getElementById('upd-check');
+  if (b){ b.disabled = true; b.textContent = 'Checking…'; }
+  setStatus('running', 'Comparing this herman with the published one…');
+  try {
+    const d = await (await fetch('/api/update?t=' + TOKEN + '&refresh=1')).json();
+    renderUpdate(d);
+    if (!d.ok) setStatus('error', 'Could not check the source: ' + d.error);
+    else if (d.update_available) setStatus('warn', 'herman ' + d.latest + ' is published (this copy is ' + d.installed + ')');
+    else setStatus('done', 'herman ' + d.installed + ' is the newest published');
+  } catch (e) {
+    setStatus('error', 'Could not check the source.');
+  } finally {
+    if (b){ b.disabled = false; b.textContent = 'Check for updates'; }
+  }
+}
+function openUpdateModal(){
+  const d = updLast || {};
+  const live = d.sessions || [];
+  const lead = document.getElementById('upd-lead');
+  if (lead){
+    lead.textContent = 'Install herman ' + (d.latest || '?') + ' over ' + (d.installed || '?')
+      + '. The files herman is made of are replaced — the current ones are backed up first. The panel '
+      + 'locks itself with the progress while that runs, and this tab reloads into the new panel when '
+      + 'the update reports done.';
+  }
+  kv('upd-info', [
+    ['installed', d.installed || '?'],
+    ['published', (d.latest || '?') + (d.rev ? '  ·  rev ' + d.rev : '')],
+    ['source', d.source || ''],
+    ['updates', (d.prefix || '~/.local') + ' — herman\'s own scripts: the CLI, the panel page, its assets, the completion'],
+    ['never writes', '~/.hermes — projects, sessions, memory, skills, config (your data)'],
+    ['sessions', 'live Hermes sessions keep running and stay on the project cards'],
+    ['panel', (d.panel && d.panel.unit_supervises)
+              ? (d.panel.unit + ' is restarted for you')
+              : 'no service supervises it: restart it yourself after the update'],
+  ]);
+  const box = document.getElementById('upd-sessions');
+  if (box){
+    box.textContent = '';
+    if (!live.length){
+      box.append(tag('No Hermes session is live right now.', 'ok'));
+    } else {
+      /* Sessions belong to their profiles, not to herman: they keep running through the update and
+         the project cards still show them afterwards. So this is information, not a warning. */
+      box.append(tag(live.length + ' Hermes session(s) keep running — herman does not stop them:', 'ok'));
+      const ul = document.createElement('ul');
+      ul.className = 'upd-sessions';
+      live.forEach(s => {
+        const li = document.createElement('li');
+        li.textContent = s.project + '  ·  pid ' + s.pid
+          + ((s.id || s.session_id) ? '  ·  ' + (s.id || s.session_id) : '');
+        ul.append(li);
+      });
+      box.append(ul);
+    }
+  }
+  const inp = document.getElementById('upd-confirm');
+  const go = document.getElementById('upd-go');
+  if (inp){ inp.value = ''; inp.disabled = false; }
+  if (go){ go.hidden = false; go.disabled = false; }
+  openModal('upd-modal');
+}
+function showUpdateProblem(msg, d){
+  const lead = document.getElementById('upd-lead');
+  const box = document.getElementById('upd-sessions');
+  const go = document.getElementById('upd-go');
+  const inp = document.getElementById('upd-confirm');
+  if (go){ go.hidden = true; }
+  if (inp){ inp.disabled = true; }
+  if (lead){ lead.textContent = msg; }
+  kv('upd-info', [
+    ['state', (d && d.state) || 'failed'],
+    ['error', (d && d.error) || msg],
+    ['log', (d && d.log) || '~/.cache/herman/update/install.log'],
+    ['backup', (d && d.backup) || '~/.cache/herman/update/'],
+    ['rollback', 'RESTORE.txt in that backup folder names the exact copy-back command'],
+  ]);
+  if (box){
+    box.textContent = '';
+    box.append(tag('Nothing about your projects changed: an update only moves herman\'s own files.', 'ok'));
+  }
+  openModal('upd-modal');
+  setStatus('error', msg);
+}
+async function applyUpdate(){
+  const inp = document.getElementById('upd-confirm');
+  const typed = ((inp && inp.value) || '').trim();
+  if (typed !== 'update'){
+    if (inp){ inp.focus(); inp.select(); }
+    setStatus('error', 'Type "update" in the dialog to confirm.');
+    return;
+  }
+  const go = document.getElementById('upd-go');
+  if (go) go.disabled = true;
+  setStatus('running', 'Starting the update…');
+  try {
+    const q = new URLSearchParams({t: TOKEN, confirm: 'update'});
+    const res = await fetch('/api/update?' + q.toString(),
+                            {method: 'POST', headers: {'X-Herman-Token': TOKEN}});
+    const d = await res.json().catch(() => ({ok: false, error: res.status + ' ' + res.statusText}));
+    if (!res.ok || !d.ok){
+      if (go) go.disabled = false;
+      showUpdateProblem(d.error || 'the update was refused', d);
+      return;
+    }
+    /* Started: the dialog gives way to the lock. From here the panel is locked, the card shows the
+       progress, and the tab reloads itself into the new panel when the update reports done. */
+    closeModal('upd-modal');
+    lockPanel('Starting the update…');
+    watchUpdate();
+  } catch (e) {
+    if (go) go.disabled = false;
+    showUpdateProblem('The update could not start: ' + e, {});
+  }
+}
+async function watchUpdate(){
+  /* Poll the progress file until the helper reports an outcome. A failed request is NOT an error
+     here: it is the panel restarting, which is the middle of a normal update - the tab keeps its
+     token and cookie, so it reloads by itself once the new panel answers. */
+  if (updTimer){ clearInterval(updTimer); updTimer = null; }
+  const started = Date.now();
+  let finished = false;
+  const stop = () => {
+    finished = true;
+    if (updTimer){ clearInterval(updTimer); updTimer = null; }
+  };
+  const tick = async () => {
+    let d = null;
+    try { d = await (await fetch('/api/update-log?t=' + TOKEN)).json(); } catch (e) { d = null; }
+    const lead = document.getElementById('upd-lead');
+    if (!d || !d.state){
+      /* The panel is down: that is the restart in the middle of the update, not a failure. */
+      if (lead) lead.textContent = UPD_STEPS.restart;
+      lockPanel(UPD_STEPS.restart);
+      setStatus('running', 'Panel restarting…');
+    } else {
+      const label = UPD_STEPS[d.state] || d.state;
+      if (lead) lead.textContent = label + (d.note ? '  ·  ' + d.note : '');
+      if (d.state === 'done'){
+        stop();
+        const go = document.getElementById('upd-go');
+        if (go) go.hidden = true;
+        /* Everything checked out (the helper verified the installed copy and waited for the panel):
+           unlock, then bring THIS tab back on the new panel. The reload carries the token, so the
+           browser session that was active stays the same session. */
+        unlockPanel();
+        const adaptedTxt = d.adapted ? ('  ·  ' + String(d.adapted).slice(0, 90)) : '';
+        setStatus('done', 'herman ' + (d.version || '') + ' installed' + adaptedTxt + ' · reloading');
+        setTimeout(reloadPanel, 900);
+        return;
+      }
+      if (d.state === 'error'){
+        stop();
+        unlockPanel();
+        showUpdateProblem(d.error || 'the update failed', d);
+        return;
+      }
+      lockPanel(label + (d.note ? '  ·  ' + d.note : ''));
+      updateLockCard(label, d);
+      setStatus('running', label);
+    }
+    if (Date.now() - started > 45000){
+      /* No outcome for a while: offer the manual way out rather than leaving the operator locked. */
+      const reload = document.getElementById('upd-lock-reload');
+      if (reload) reload.hidden = false;
+    }
+    if (Date.now() - started > 180000){
+      stop();
+      unlockPanel();
+      showUpdateProblem('The update did not report an outcome within three minutes.', d || {});
+    }
+  };
+  await tick();
+  if (!finished) updTimer = setInterval(tick, 2000);
+}
+function lockPanel(step){
+  /* Lock the panel for the duration of an update. `.app` goes inert, so a click, a keypress or a
+     Tab cannot reach anything behind the card: the operator asked for "locked with progress", not
+     for a dialog they can click past while herman rewrites its own files. */
+  const lock = document.getElementById('upd-lock');
+  const app = document.querySelector('.app');
+  if (app) app.setAttribute('inert', '');
+  document.body.classList.add('upd-locked');
+  const reload = document.getElementById('upd-lock-reload');
+  if (reload) reload.hidden = true;
+  if (lock) lock.hidden = false;
+  updateLockCard(step || 'Updating herman…', null);
+}
+function unlockPanel(){
+  const lock = document.getElementById('upd-lock');
+  const app = document.querySelector('.app');
+  if (lock) lock.hidden = true;
+  if (app) app.removeAttribute('inert');
+  document.body.classList.remove('upd-locked');
+}
+function updateLockCard(step, d){
+  const el = document.getElementById('upd-lock-step');
+  if (el && step) el.textContent = step;
+  kv('upd-lock-kv', [
+    ['installed', (d && d.was) || (updLast && updLast.installed) || '?'],
+    ['installing', (d && d.target) || (updLast && updLast.latest) || '?'],
+    ['updates', (d && d.prefix) || (updLast && updLast.prefix) || '~/.local'],
+    ['never writes', '~/.hermes — projects, sessions, memory, skills, config (your data)'],
+    ['sessions', ((d && d.sessions) != null ? d.sessions : ((updLast && (updLast.sessions || []).length) || 0))
+                 + ' Hermes session(s) keep running · the project cards still show them'],
+    ['after install', 'the new copy re-checks your data once (sync --fix), so a new feature finds '
+                      + 'what it needs and none of your data has to be rebuilt'],
+    ['progress', (d && d.log) || '~/.cache/herman/update/install.log'],
+  ]);
+}
+async function resumeIfUpdating(){
+  /* A reload during an update must not drop the lock (and must not pretend the panel is idle): the
+     progress file says whether an update is still running, so the lock comes back and watching
+     resumes. */
+  let d = null;
+  try { d = await (await fetch('/api/update-log?t=' + TOKEN)).json(); } catch (e) { return; }
+  const running = d && ['starting', 'backup', 'install', 'verify', 'restart', 'health'].includes(d.state);
+  if (!running) return;
+  lockPanel((UPD_STEPS[d.state] || 'Updating herman…') + (d.note ? '  ·  ' + d.note : ''));
+  watchUpdate();
+}
+function reloadPanel(){
+  /* Same trick the header Refresh uses: a fresh URL defeats a cached copy, and carrying the token
+     renews the session cookie in case the restart dropped it. */
+  const u = new URL(location.href);
+  u.searchParams.set('v', String(Date.now()));
+  if (tokenDead) u.searchParams.delete('t'); else u.searchParams.set('t', TOKEN);
+  location.replace(u.toString());
+}
+
 async function refreshAll(){
   await refresh(); await loadFocus(); await backupTable(); await loadUsageAll(); await loadAbout();
+  /* The About pane shows the CACHED verdict (when there is one) - a board load never reaches the
+     network on its own. */
+  await loadUpdate(true);
+  /* A tab reloaded in the middle of an update comes back locked, with the progress card, instead of
+     looking idle. */
+  await resumeIfUpdating();
 }
 
 async function backupTable(){
@@ -3085,6 +3525,7 @@ function renderUsageAll(u){
     'No usage recorded yet.');
 }
 async function loadUsage(){
+  await whenFocusReady();            // the focus project is picked by the project list, not by us
   const sel = document.getElementById('focus');
   const nm = focusProject || (sel ? sel.value : '');
   if (!nm || !document.getElementById('ins-usage-tiles')) return;
@@ -3535,12 +3976,314 @@ function renderInsights(i){
     (e.top || []).map(t => [t.level, t.n, t.last, t.message]), 'errors.log is clean.');
 }
 async function loadInsights(){
+  await whenFocusReady();            // never bail out because the project list has not landed yet
   const sel = document.getElementById('focus');
   const nm = focusProject || (sel ? sel.value : '');
   if (!nm || !document.getElementById('ctx-table')) return;
+  if (nm === insightsLoadedFor) return;     // same project already rendered: keep it
   try {
     renderInsights(await (await fetch(`/api/insights?t=${TOKEN}&name=${encodeURIComponent(nm)}`)).json());
+    insightsLoadedFor = nm;
   } catch (e) { setHint('ctx-note', 'could not load insights'); }
+}
+/* The Insights board is per project, but it is opened before refresh() has filled the dropdown and
+   loadFocus() has picked the active project - so its load used to return early and every pane stayed
+   empty until the operator picked a project by hand. Wait for the focus project (the same way the
+   Access board waits for it), then load: the active project is selected for you, so its data shows
+   up on its own. */
+let focusWait = null;
+let insightsLoadedFor = '';
+function whenFocusReady(){
+  const known = () => focusProject || ((document.getElementById('focus') || {}).value || '');
+  if (known()) return Promise.resolve();
+  if (!focusWait){
+    focusWait = new Promise(res => {
+      let tries = 0;
+      const tick = () => {
+        if (known() || ++tries > 120) res();   // ~7 s, then give up and let the caller bail out
+        else setTimeout(tick, 60);
+      };
+      tick();
+    });
+  }
+  return focusWait;
+}
+async function loadInsightsBoard(){
+  await whenFocusReady();
+  await Promise.all([loadInsights(), loadUsage()]);
+}
+/* ---------- Insights > Last session: what CLOSED sessions left behind ---------- */
+/* A session that is still running has no "last" record: its transcript is still being written, so
+   the backend skips live leases and this board only ever lists closes. Rolling 24 h window, newest
+   first; a close from the last hour is marked as fresh. Read-only. */
+let lastCache = null;
+let lastPage = 1;            /* real pagination: only one page of entries is in the DOM at a time */
+let lastPer = 20;            /* entries per page */
+let lastCompact = true;      /* one scannable row per session vs every entry expanded */
+try { lastCompact = (localStorage.getItem('herman.last.mode') || 'compact') !== 'full'; } catch (e) {}
+try { lastPer = parseInt(localStorage.getItem('herman.last.per') || '20', 10) || 20; } catch (e) {}
+function lastWhen(ts){ return ts ? new Date(ts * 1000).toLocaleString() : '-'; }
+function lastKv(e){
+  return [
+    ['project', e.project],
+    ['session', e.session],
+    ['last active', lastWhen(e.last_active)],
+    ['closed', lastWhen(e.closed_at) + '  ·  ' + e.closed + (e.end_reason ? ' (' + e.end_reason + ')' : '')],
+    ['stored', e.messages + ' messages · ' + e.tools + ' tool calls'],
+    ['model', e.model || '-'],
+    ['workdir', e.cwd || '-'],
+  ];
+}
+function lastBlock(label, text){
+  const box = document.createElement('div');
+  box.className = 'last-block';
+  const l = document.createElement('div');
+  l.className = 'lbl'; l.textContent = label;
+  const t = document.createElement('pre');
+  t.className = 'last-text'; t.textContent = (text && String(text).trim()) ? text : '(empty)';
+  box.append(l, t);
+  return box;
+}
+function lastAgo(ts){
+  if (!ts) return '-';
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+function lastExcerpt(e){
+  const r = e.last_result || {};
+  const text = r.text || (e.last_prompt || {}).text || '';
+  const flat = String(text).replace(/\s+/g, ' ').trim();
+  return flat ? flat.slice(0, 150) : '(nothing stored)';
+}
+function lastEntry(e){
+  /* ONE row per closed session: project · when · id · what it left behind · excerpt. The detail
+     (prompt, result, tail button) only exists in the DOM of an entry that is open, so a window with
+     a hundred closes stays a scannable list instead of a wall of text. */
+  const box = document.createElement('div');
+  box.className = 'card last-entry ' + (e.fresh ? 'fresh' : (e.in_window ? '' : 'older'))
+                  + (lastCompact ? '' : ' open');
+  const r = e.last_result;
+  const row = document.createElement('div');
+  row.className = 'last-row';
+  row.title = 'Click to open this session: last prompt, last result and the stored tail.';
+  const caret = document.createElement('span'); caret.className = 'caret'; caret.textContent = '▶';
+  const who = document.createElement('span'); who.className = 'who'; who.textContent = e.project;
+  const when = document.createElement('span'); when.className = 'when';
+  when.textContent = lastAgo(e.last_active);
+  when.title = lastWhen(e.last_active);
+  const sid = document.createElement('span'); sid.className = 'sid'; sid.textContent = e.session;
+  const badge = tag(e.fresh ? 'fresh' : (e.in_window ? 'in window' : 'older'),
+                    e.fresh ? 'ok' : (e.in_window ? '' : 'warn'));
+  badge.title = e.closed + (e.end_reason ? ' (' + e.end_reason + ')' : '')
+    + ' · closed ' + lastWhen(e.closed_at);
+  const kind = tag(r ? (r.kind + (r.tool ? ' · ' + r.tool : '')) : '-', e.end_reason ? '' : 'warn');
+  if (r && r.note) kind.title = r.note;
+  const ex = document.createElement('span'); ex.className = 'ex'; ex.textContent = lastExcerpt(e);
+  row.append(caret, who, when, badge, sid, kind, ex);
+  row.onclick = () => box.classList.toggle('open');
+  box.append(row);
+
+  const detail = document.createElement('div');
+  detail.className = 'detail';
+  const meta = document.createElement('p');
+  meta.className = 'hint';
+  meta.textContent = e.messages + ' messages · ' + e.tools + ' tool calls'
+    + (typeof e.cost === 'number' ? '  ·  $' + e.cost.toFixed(4) : '')
+    + (e.model ? '  ·  ' + e.model : '') + (e.cwd ? '  ·  ' + e.cwd : '')
+    + '  ·  closed ' + lastWhen(e.closed_at) + ' (' + e.closed
+    + (e.end_reason ? ' · ' + e.end_reason : '') + ')';
+  detail.append(meta);
+  detail.append(lastBlock('last prompt', e.last_prompt
+    ? (e.last_prompt.injected ? '[injected by Hermes] ' : '') + e.last_prompt.text
+    : 'no prompt stored in this session'));
+  detail.append(lastBlock('last result' + (r ? ' · ' + r.kind + (r.tool ? ' · ' + r.tool : '') : ''),
+                          r ? r.text : 'nothing stored'));
+  if (r && r.note){
+    const n = document.createElement('p'); n.className = 'hint'; n.textContent = r.note;
+    detail.append(n);
+  }
+  if (r && r.kind === 'tool_call' && r.args) detail.append(lastBlock('the call that was running', r.args));
+  const actions = document.createElement('div');
+  actions.className = 'btnrow';
+  actions.append(big('Full text and tail', () => openLastDetail(e.project, e.session), 'tiny ghost',
+    "Read this session's stored tail, the full last prompt and the full last result (read-only)."));
+  detail.append(actions);
+  box.append(detail);
+  return box;
+}
+async function loadLastSessions(force){
+  const list = document.getElementById('last-list');
+  if (!list) return;
+  if (!force && lastCache && (Date.now() / 1000 - (lastCache.generated_at || 0)) < 30) return;
+  setHint('last-sum', 'reading closed sessions from every project…');
+  let d = null;
+  try {
+    d = await (await fetch('/api/last-sessions?t=' + TOKEN + '&brief=1')).json();
+  } catch (e) {
+    setHint('last-sum', 'could not read the closed sessions (is the panel still up?)');
+    return;
+  }
+  lastCache = d;
+  lastPage = 1;                       // fresh data: start at the newest again
+  renderLastSessions(d);
+}
+function lastPagerInto(box, total, pages, from, count){
+  /* One builder, two placements: the pager sits above the list and again below it, so paging after
+     scrolling to the end never means scrolling back up. */
+  if (!box) return;
+  box.textContent = '';
+  const mk = (label, tip, fn, disabled) => {
+    const b = document.createElement('button');
+    b.className = 'ghost tiny';
+    b.textContent = label;
+    b.title = tip;
+    b.disabled = !!disabled;
+    b.onclick = fn;
+    return b;
+  };
+  box.append(
+    mk('« First', 'First page of closed sessions.', () => lastPageTo(1), lastPage <= 1 || total === 0),
+    mk('‹ Prev', 'Previous page (the data is already loaded; nothing is re-read).', () => lastPageBy(-1),
+       lastPage <= 1 || total === 0));
+  const pos = document.createElement('span');
+  pos.className = 'hint';
+  pos.textContent = total
+    ? ('page ' + lastPage + ' of ' + pages + '  ·  ' + (from + 1) + '–' + (from + count) + ' of ' + total)
+    : 'nothing in the window';
+  box.append(pos,
+    mk('Next ›', 'Next page (the data is already loaded; nothing is re-read).', () => lastPageBy(1),
+       lastPage >= pages || total === 0),
+    mk('Last »', 'Last page of closed sessions.', () => lastPageTo(0), lastPage >= pages || total === 0));
+  const lab = document.createElement('label');
+  lab.className = 'hint';
+  lab.append('per page ');
+  const sel = document.createElement('select');
+  sel.title = 'How many closed sessions to show on one page.';
+  [10, 20, 50, 100].forEach(n => {
+    const o = document.createElement('option');
+    o.value = String(n);
+    o.textContent = String(n);
+    if (n === lastPer) o.selected = true;
+    sel.append(o);
+  });
+  sel.onchange = () => lastSetPer(sel.value);
+  lab.append(sel);
+  box.append(lab);
+}
+function renderLastSessions(d){
+  const list = document.getElementById('last-list');
+  if (!list) return;
+  list.textContent = '';
+  const all = (d && d.sessions) || [];
+  const total = all.length;
+  const pages = Math.max(1, Math.ceil(total / lastPer));
+  lastPage = Math.max(1, Math.min(lastPage, pages));
+  const from = (lastPage - 1) * lastPer;
+  const shown = all.slice(from, from + lastPer);
+  const hours = Math.round(((d && d.window_s) || 86400) / 3600);
+  /* The pager is placed twice - once above the list, once below it - and both copies are rebuilt
+     from the same state, so paging after scrolling to the end never means scrolling back up. */
+  lastPagerInto(document.getElementById('last-pager-top'), total, pages, from, shown.length);
+  lastPagerInto(document.getElementById('last-pager-bottom'), total, pages, from, shown.length);
+  const btnMode = document.getElementById('last-mode');
+  if (btnMode) btnMode.textContent = lastCompact ? 'Show all details' : 'Compact rows';
+  setHint('last-sum', total
+    ? (total + ' closed session(s) in the rolling ' + hours + ' h window'
+       + (d.fresh ? '  ·  ' + d.fresh + ' closed in the last hour' : '')
+       + '  ·  newest first  ·  ' + lastPer + ' per page  ·  click a row to open it')
+    : 'No session has been closed in the rolling ' + hours + ' h window yet.');
+  if (!shown.length){
+    const p = document.createElement('div');
+    p.className = 'card pad';
+    const h = document.createElement('p');
+    h.className = 'hint';
+    h.textContent = 'Nothing to show: close a Hermes session (or its terminal window) and its last '
+      + 'prompt and last result appear here. A session that is still open never appears — it has no '
+      + '"last" record yet.';
+    p.append(h);
+    list.append(p);
+    return;
+  }
+  shown.forEach(e => list.append(lastEntry(e)));
+}
+function lastPageBy(delta){
+  lastPage += delta;
+  if (lastCache) renderLastSessions(lastCache);
+}
+function lastPageTo(page){
+  /* 0 = last page (the count is only known inside renderLastSessions, so ask it). */
+  if (!lastCache) return;
+  if (page === 0){
+    const total = (lastCache.sessions || []).length;
+    lastPage = Math.max(1, Math.ceil(total / lastPer));
+  } else {
+    lastPage = page;
+  }
+  renderLastSessions(lastCache);
+}
+function lastSetPer(value){
+  const per = parseInt(value, 10);
+  lastPer = (per >= 5 && per <= 200) ? per : 20;
+  lastPage = 1;
+  try { localStorage.setItem('herman.last.per', String(lastPer)); } catch (e) {}
+  if (lastCache) renderLastSessions(lastCache);
+}
+function lastToggleMode(){
+  lastCompact = !lastCompact;
+  try { localStorage.setItem('herman.last.mode', lastCompact ? 'compact' : 'full'); } catch (e) {}
+  if (lastCache) renderLastSessions(lastCache);
+}
+function lastExpandAll(){
+  document.querySelectorAll('#last-list .last-text').forEach(el => el.classList.toggle('open'));
+}
+async function openLastDetail(project, session){
+  let d = null;
+  try {
+    d = await (await fetch('/api/last-session?t=' + TOKEN + '&name=' + encodeURIComponent(project)
+                           + '&session=' + encodeURIComponent(session))).json();
+  } catch (e) {
+    setStatus('error', 'could not read that session');
+    return;
+  }
+  if (!d || d.error){
+    setStatus('error', (d && d.error) || 'could not read that session');
+    return;
+  }
+  const head = document.getElementById('last-modal-head');
+  if (head) head.textContent = 'Closed session · ' + d.project;
+  kv('last-modal-kv', lastKv(d));
+  const body = document.getElementById('last-modal-body');
+  body.textContent = '';
+  if (d.last_prompt){
+    body.append(lastBlock('last prompt' + (d.last_prompt.injected ? '  ·  injected by Hermes' : ''),
+                          d.last_prompt.text));
+  }
+  const r = d.last_result;
+  if (r){
+    body.append(lastBlock('last result  ·  ' + r.kind + (r.tool ? ' · ' + r.tool : '')
+                          + (r.note ? '  (' + r.note + ')' : ''), r.text));
+    if (r.kind === 'tool_call' && r.args) body.append(lastBlock('the call that was running', r.args));
+  }
+  if (d.tail && d.tail.length){
+    body.append(lastBlock('stored tail (' + d.tail.length + ' rows, oldest first)',
+      d.tail.map(t => '[' + new Date(t.at * 1000).toLocaleTimeString() + '] ' + t.role
+        + (t.tool ? ':' + t.tool : '')
+        + (t.calls && t.calls.length ? ' → ' + t.calls.join(', ') : '')
+        + (t.finish ? ' (' + t.finish + ')' : '')
+        + '\n    ' + ((t.text || '').split('\n').join('\n    '))).join('\n')));
+  }
+  openModal('last-modal');
+}
+function copyLastDetail(){
+  const body = document.getElementById('last-modal-body');
+  const kvBox = document.getElementById('last-modal-kv');
+  const text = (kvBox ? kvBox.innerText + '\n\n' : '') + (body ? body.innerText : '');
+  navigator.clipboard.writeText(text).then(
+    () => setStatus('done', 'Closed-session detail copied.'),
+    () => setStatus('error', 'Copy failed · select the text manually.'));
 }
 let msgContext = null;
 function killProjectSessions(name, count){
@@ -4644,7 +5387,8 @@ async function renameProject(old, next){
     return false;
   }
   if (wasFocus === old){
-    await Promise.all([loadFocus(), loadUsage(), loadInsights()]);   // the per-project boards moved
+    await loadFocus();                                            // the project list must land first
+    await Promise.all([loadUsage(), loadInsights()]);             // the per-project boards moved
     loadModelTabIfVisible();
   }
   setStatus('ok', 'Project renamed: ' + old + ' → ' + to);
@@ -4925,6 +5669,17 @@ function removeFocus(){ removeProject(focusProject); }
 const PANE_LOADERS = {
   'access:integrations': () => loadIntegrationsWhenReady(),
   'maintenance:focus': () => renderFocusPane(),
+  'insights:last': () => loadLastSessions(),
+  /* Every Insights pane is fed by the same per-project payload, so they all ask for it - with the
+     focus-project wait and the per-project cache, a tab switch neither races the project list nor
+     refetches what is already on screen. */
+  'insights:usage': () => loadInsightsBoard(),
+  'insights:search': () => loadInsightsBoard(),
+  'insights:activity': () => loadInsightsBoard(),
+  'insights:tools': () => loadInsightsBoard(),
+  'insights:context': () => loadInsightsBoard(),
+  'insights:cache': () => loadInsightsBoard(),
+  'insights:errors': () => loadInsightsBoard(),
 };
 function vtab(view, key){
   const root = document.getElementById('view-' + view);

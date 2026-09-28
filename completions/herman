@@ -12,9 +12,9 @@ _herman() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --summary --tidy --logs --audit --unused --status web completion model git access kill stop sync refresh security sec history remove rm delete --stats --delete-message --delete-session --delete-matching --delete-all --session --all --fix --dry-run -y --yes -v --verbose --json -h --help --set --provider --list --refresh --endpoints --endpoint --base-url --probe --new-token"
+  opts="-u --use -p --project -l --list -r --remove -i --info -d --doctor -b --backup -x --restore -C --cwd --rename --alias --usage --summary --tidy --logs --audit --unused --status web completion model git access kill stop sync refresh security sec history last recent remove rm delete update upgrade --stats --delete-message --delete-session --delete-matching --delete-all --session --all --fix --dry-run --check --source --prefix --no-restart --within --limit -y --yes -v --verbose --json -h --help --set --provider --list --refresh --endpoints --endpoint --base-url --probe --new-token"
   case "${prev}" in
-    -u|--use|-i|--info|-d|--doctor|-r|--remove|-C|--cwd|--usage|--logs|--audit|--alias|remove|rm|delete|history|kill|stop|sync|refresh|security|sec)
+    -u|--use|-i|--info|-d|--doctor|-r|--remove|-C|--cwd|--usage|--logs|--audit|--alias|remove|rm|delete|history|last|recent|kill|stop|sync|refresh|security|sec)
       COMPREPLY=( $(compgen -W "$(_herman_projects)" -- "${cur}") ); return 0 ;;
     -b|--backup)
       COMPREPLY=( $(compgen -W "$(_herman_projects) --all" -- "${cur}") ); return 0 ;;

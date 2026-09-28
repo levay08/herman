@@ -2,21 +2,18 @@
 
 **hermes-agent · simple task manager**
 
-herman is a small, dependency-free manager for your
-[Hermes Agent](https://hermes-agent.nousresearch.com/docs) projects (profiles): one CLI plus one local
-web panel, on top of the `hermes` binary you already have. It simplified the Hermes-dashboard and keeps every project in one place
-(create, enter, back up, inspect, delete), shows what runs and what each one costs, reads the analytics
-Hermes already writes to `state.db`, and turns those token and prompt-cache numbers into plain summary:
-how you and the agent actually got there, and what to change next time. It never reimplements the
-agent: sessions, model switches and profile changes go through the `hermes` binary, and the settings
-herman writes itself (`herman config`) go into one project's own `config.yaml` / `.env`, after a
-backup. It uploads nothing anywhere.
+A small, dependency-free manager for your
+[Hermes Agent](https://hermes-agent.nousresearch.com/docs) projects (profiles): one CLI and one local
+web panel, on top of the `hermes` binary you already have. It keeps every project in one place
+(create, enter, back up, inspect, delete), shows what runs and what each one costs, and reads the
+analytics Hermes already writes to `state.db`. It never reimplements the agent: sessions, model
+switches and profile changes go through `hermes`, and the settings herman writes itself land in one
+project's own `config.yaml` / `.env`, after a backup. It uploads nothing anywhere.
 
-## The command shape: why herman is shorter than the engine it wraps
+## Why herman is shorter than the engine it wraps
 
-herman is a front door, not `hermes` under another name. The project is implicit (it defaults to the
-one you are working in, else the last one you used), values are positional, and a setting is simply
-`key=value`. Same jobs, words per command:
+The project is implicit (the one you are working in, else the last one you used), values are
+positional, a setting is `key=value`:
 
 | job | hermes | herman |
 |---|---|---|
@@ -33,18 +30,15 @@ one you are working in, else the last one you used), values are positional, and 
 | project history | `hermes -p web insights` | `herman hist` |
 | health check | `hermes -p web doctor` | `herman -d` |
 
-Across the 18 jobs where both CLIs have a verb: hermes 101 words, herman 59 (42% fewer), and herman
-is shorter in every one of them. The long spellings keep working
-(`herman config web chat telegram --set require_mention=false`); the short ones are what `herman -h`
-leads with and what the panel runs when you press a button, so the CLI and the web board say the
-same words.
+Across the 18 jobs where both CLIs have a verb: hermes 101 words, herman 59. The long spellings keep
+working (`herman config web chat telegram --set require_mention=false`); the short ones are what
+`herman -h` leads with and what the panel runs when you press a button.
 
 ## Requirements
 
-- Hermes Agent installed and on your PATH (`hermes -V`)
+- Hermes Agent on your PATH (`hermes -V`)
 - Python 3.9+ (standard library only, no pip)
-- Linux or macOS. Native Windows is not supported yet: herman leans on POSIX signals and `/proc` for
-  live sessions and for stopping one politely, so on Windows run it inside WSL2
+- Linux or macOS (on Windows use WSL2: herman leans on POSIX signals and `/proc` for live sessions)
 - a terminal emulator only for the "open a session window" button
 
 ## Install
@@ -54,8 +48,8 @@ git clone https://github.com/levay08/herman.git
 cd herman && ./install.sh
 ```
 
-That copies `~/.local/bin/herman`, `~/.local/share/herman/index.html` and the bash completion. You
-can also run `./herman -l` and `./herman web` straight from the clone, without installing anything.
+That copies `~/.local/bin/herman`, `~/.local/share/herman/index.html` and the bash completion.
+`./herman -l` and `./herman web` also run straight from the clone.
 
 ## CLI
 
@@ -63,89 +57,91 @@ can also run `./herman -l` and `./herman web` straight from the clone, without i
 
 ```sh
 herman                       dashboard: every project, its model, skills, memory, live session
-herman -p work               create a project (a Hermes profile)
-herman work                  enter its Hermes session (hands the terminal over to hermes)
-herman -u 2                  enter project number 2
+herman <name>                enter its Hermes session
+herman -p <name>             create a project (--clone copies config, keys and skills)
 herman -l | -i [name]        list projects / inspect one
-herman pin [name]            keep a project in the first row of the Projects board (three at most)
-herman unpin <name>          release it again (`herman pin --list` shows what is pinned)
+herman pin | unpin <name>    keep up to three projects in the first row of the Projects board
+herman --rename <old> <new>  rename a project (profile, shortcut command and note follow)
 herman -r <name>             delete a project and its profile
-herman --rename <old> <new>  rename a project (its profile, shortcut command and note follow)
 herman -d [name|--all]       doctor: read-only health check
 herman sync [--fix]          re-check herman against the installed Hermes
+herman update [--check]      update herman itself (--dry-run, --no-restart); herman's files only
 ```
 
 **Sessions, models, history**
 
 ```sh
-herman kill <name> [session-id]        stop a running session (SIGINT first, like Ctrl+C)
-herman model [name]                    current model, provider and endpoint
-herman model <name> --list             models your endpoint offers, with prices
-herman model <name> --endpoints        every endpoint you can point the project at
-herman model <name> --endpoint <key|url>  switch model.base_url (a provider preset or any URL,
-                                       plus `--endpoint default` to drop it); written with
-                                       `hermes config set`, so Hermes itself picks it up
-herman model <name> --probe [key|url]  test an endpoint and write nothing
-herman model <name> --set <id>         switch model (--provider <p> changes the provider)
-herman history <name> --stats          sessions, messages and usage rows
-herman history <name> --delete-matching <q> | --delete-session <id> | --delete-all
-herman --usage [--days N]              tokens and estimated cost
-herman -b <name|--all>                 back up to ~/Documents/herman-backup/
-herman -x <file> [--as name]           restore a backup
-herman --tidy [--all] | --logs <name>  free disk space / read the agent log
-herman security                        re-run the panel's security battery: auth carriers, origin
-                                       and host guards, POST-only writes, argv shapes, body cap,
-                                       traversal, response headers, file modes. Read-only, so it is
-                                       safe to run any time (it exits non-zero on drift)
+herman kill <name> [session-id]   stop a running session the polite way (SIGINT first, like Ctrl+C)
+herman model [name] [<id>]        show, or switch the model; @<url|preset> switches the endpoint
+herman model <name> --list | --endpoints | --probe | --set <id> | --provider <p>
+herman last [name|--all]          CLOSED sessions (rolling 24 h): the last prompt and the last
+                                  result of each — final answer, tool call still in flight, or the
+                                  last output when no answer was written (--within, --limit, --json)
+herman history <name> --stats     sessions, messages and usage rows (--delete-matching|session|all)
+herman --usage [--days N] | -b <name|--all> | -x <file> | --tidy | --logs <name>
+herman security                   the panel's security battery: auth carriers, origin and host
+                                  guards, POST-only writes, argv shapes, body cap, traversal,
+                                  response headers, file modes. Read-only, exits non-zero on drift
 ```
 
-**Configure (chat platforms, web backends, MCP servers)**
-
-`herman config` writes into one project's own `config.yaml` and `.env`: the keys the boards show are
-the keys it may touch, every file is backed up first (`*.herman-backup-<stamp>`), secrets are written
-with mode 0600 and never typed on the command line (they come from a prompt or from the panel's POST
-body). herman itself never contacts a provider: it edits the files Hermes reads, and the gateway or
-client you start is what connects.
+**Configure: chat platforms, web backends, MCP servers**
 
 ```sh
 herman config [name]                        what is set, and the command that changes it
-herman config <name> chat telegram --enable | --disable
-herman config <name> chat telegram --token  store the bot token in .env (asked for, never in argv)
-herman config <name> chat telegram --set allowed_chats=123,456 --set require_mention=true
-herman config <name> chat telegram --clear-token     (type the variable name to confirm)
-herman config <name> web --set backend=exa --set cache_ttl_minutes=30
-herman config <name> web --key EXA_API_KEY | --unset-key EXA_API_KEY
-herman config <name> mcp add <server> --url <endpoint> | --command <cmd> [--args a,b]
-herman config <name> mcp enable | disable | rm <server>   (rm asks for the server name)
+herman c <name> tg on|off | token | k=v ... chat platform (tg, dc), settings as key=value
+herman c <name> web backend=exa | web EXA_API_KEY | web drop EXA_API_KEY
+herman m <name> add docs <url|cmd ...> | rm|on|off docs      MCP server: url or command + args
 ```
 
-The same writes, in the short spellings the help leads with (the long forms above keep working):
-
-```sh
-herman c <name> tg on|off <name> tg token <name> c tg require_mention=false allowed_chats=123
-herman c <name> web backend=exa   |   <name> c web EXA_API_KEY   |   web drop EXA_API_KEY
-herman m <name> add docs <url|cmd ...>   |   m <name> rm|on|off docs
-```
+`herman config` writes into one project's own `config.yaml` and `.env`: the keys the boards show are
+the keys it may touch, every file is backed up first (`*.herman-backup-<stamp>`), secrets are written
+0600 and never typed on the command line. herman never contacts a provider: it edits the files
+Hermes reads, and the gateway or client you start is what connects. The long spellings keep working
+(`herman config <name> chat telegram --enable`, `web --set backend=exa`, `mcp add <server> --url ...`).
 
 **Memory providers and skills from outside**
 
-Both live in the engine: `hermes memory setup` configures one of its memory-provider plugins, and
-`hermes skills search|install` fetches skills from skills.sh, GitHub, ClawHub and the rest. herman
-surfaces them and runs the same calls, so a project can be pointed at either without leaving the CLI
-or the panel. Nothing here reaches out on its own: a search, an install or a setup only happens
-because you asked for it, and the setup wizard runs in its own terminal window, where the key or the
-OAuth sign-in stays out of herman's hands.
+Both live in the engine; herman surfaces them and runs the same calls.
 
 ```sh
-herman mem [name]                   MEMORY.md and USER.md against their budget, and the providers
-                                    the engine offers (which it can load, and what each one needs)
+herman mem [name]                   MEMORY.md and USER.md against budget, plus the engine's providers
 herman mem <name> add <provider>    hand over to `hermes memory setup <provider>`, in a window
-herman mem <name> off | reset       back to the built-in files / erase both (asks, archives first)
+herman mem <name> off | reset       built-in files only / erase both (asks, archives first)
 herman skill [name]                 what is installed, as the engine lists it
 herman skill <name> find <words>    search the engine's skill sources (--source github | openai ...)
 herman skill <name> add <id|url>    install one into the project (a scan verdict is not overridden)
-herman skill <name> rm <name> | up | taps   uninstall / update all / extra source repos
+herman skill <name> rm <name> | up | taps    uninstall / update all / extra source repos
 ```
+
+Nothing here reaches out on its own: a search, an install or a setup happens because you asked for
+it, and the setup wizard opens in its own window, where the key or OAuth sign-in stays out of
+herman's hands.
+
+## Updating herman itself
+
+```sh
+herman update --check           # what this copy is, what the repository publishes
+herman update                   # install the published copy over this one
+herman update --dry-run         # print the plan, write nothing
+herman update --no-restart      # leave the panel alone
+```
+
+An update moves **herman's own files only** — CLI, panel page, assets, shell completion inside the
+install prefix (`~/.local` by default). `~/.hermes` is never written, so no project, profile,
+session, memory file or setting is part of the payload; the files about to be replaced are copied to
+`~/.cache/herman/update/backup-<version>-<timestamp>/` with a `RESTORE.txt`. The flow: clone at depth
+1, run its `install.sh` against the prefix, check that the **installed copy reports the new version**,
+let it reconcile your data once (`sync --fix`), restart the panel, wait until it answers. Each step
+lands in `~/.cache/herman/update/state.json`. A running Hermes session is neither a blocker nor a
+casualty: it keeps running and stays marked on its project card when the panel comes back.
+
+From the panel: **Maintenance → About**. *Check for updates* compares this copy with the repository;
+*Update now* lists what will be written and what never will, and asks for the word `update`. While it
+runs the panel is **locked** (progress card, everything behind it inert); the lock lifts when the
+helper reports done and the tab reloads itself with its own token, so your browser session survives.
+The update source is the constant the installed copy was built with (`REPO` in the CLI), never taken
+from a request, so a click, a prefilled link or a stolen token cannot point herman at another
+repository. `HERMAN_UPDATE_SOURCE=<path|url>` is a mirror/test seam for the CLI only.
 
 ## Web panel
 
@@ -155,59 +151,42 @@ herman skill <name> rm <name> | up | taps   uninstall / update all / extra sourc
 herman web
 ```
 
-Serves `127.0.0.1:9120` and prints a URL carrying a random token. The sidebar keeps **Open projects**
-(and the project count) right under the dashboard button, for the way back to the board. The token is exchanged for an
-`HttpOnly`, `SameSite=Strict` cookie on first load, so it does not stay in your address bar, history
-or link referrers. That cookie is the tab's session: it lives for 400 days and is renewed on every
-page load, and the token survives restarts (only `herman web --new-token` rotates it), so a tab left
-open overnight, or a browser restarted in between, comes back with a plain refresh. A tab that lost
-the cookie anyway (cleared site data, rotated token) is answered with a short "this tab lost its
-panel session" page instead of a JSON error, and it first tries the copy of the token the page keeps
-in that origin's `localStorage`; when that fails too, the taskbar icon or `herman web --url` is the
-way back.
+Serves `127.0.0.1:9120` and prints a URL carrying a random token, exchanged on first load for an
+`HttpOnly`, `SameSite=Strict` cookie (renewed on every page load, survives restarts and browser
+restarts — only `herman web --new-token` rotates it), so the token does not stay in your address bar,
+history or referrers.
 
 - **Dashboard** all-project overview plus total token usage
-- **Projects** three cards per row, one card per project (model, workdir, skills, memory, live session),
-  with the note and the name editable on the card itself (the pencil beside the title renames the
-  profile folder, its shortcut command and herman's own notes). Drag a card by its title to reorder the
-  board and click the **pin** tag to keep up to three in the first row: both are stored in herman's own
-  state, never in Hermes, and the same order is what `herman -l` and the focus dropdown show. The create
-  form sits collapsed under the grid, so the cards get the full width. Actions stream their output into
-  the console at the bottom.
-  `Enter session` holds a loading overlay over the panel until that project's session lease appears in
-  the grid (Escape hides it early; the wait keeps reporting in the console), so a cold start never
-  looks like a dead button
-- **Model** current model, the **Endpoint** tab (pick one of the common provider APIs or type any
-  OpenAI-compatible URL, test it before switching, and the model list follows it) and the model
-  changer. Its **Skills** tab lists what the project loads and searches the engine's skill sources to
-  install one from outside, and its **Memory** tab shows `MEMORY.md` / `USER.md` against their budget,
-  the engine's memory providers with what each one needs and a link to its docs, a **Set up** button
-  that opens the engine's own wizard in a terminal window, and `off` / erase (`Erase` archives both
-  files into `~/.cache/herman/memory-backups/` before the engine wipes them)
-- **Insights** history search that follows what you type (no button needed) and looks in EVERY project:
-  each hit carries a tag naming the project it came from, the focus project's hits come first, and
-  opening one reads that profile's own `state.db`; plus activity, tool counters, context health, error
-  digest
-- **Access** API keys, SSH keys and hosts, git identity, credentials, live SSH connections, and the
-  **Integrations** tab: chat platforms (token, `enabled`, the platform's own settings) and web
-  search/extract backends (which backend is active, and one backend key per provider)
-- **MCP** the servers in a project's `mcp_servers` with add, enable/disable and remove, plus every
-  `hermes mcp` subcommand and whether it opens a connection
-- **Maintenance** backups, disk space, about, and a **This project** tab that names the project its
-  buttons will act on (home, workdir, model, skills, memory, running session, gateway, last used), so the
-  focus project in the header is never something you have to remember
+- **Projects** three cards per row (model, workdir, skills, memory, live session), note and name
+  editable on the card, drag to reorder, **pin** up to three in the first row — herman's own state,
+  never Hermes. `Enter session` holds a loading overlay until that project's session lease appears
+- **Model** model and **Endpoint** (provider preset or any OpenAI-compatible URL, test before
+  switching), **Skills** (what the project loads, plus a search of the engine's sources) and
+  **Memory** (`MEMORY.md` / `USER.md` against budget, the engine's providers, **Set up** opens its
+  wizard in a window, `Erase` archives both files into `~/.cache/herman/memory-backups/` first)
+- **Insights** history search that follows what you type, across EVERY project (each hit tagged with
+  its project, the focus project's first); activity, tool counters, context health, error digest, and
+  **Last session**: sessions CLOSED in the rolling last 24 hours — which project, when it was last
+  active, and what it left behind (last prompt, last result). A still-running session has no "last"
+  record, so it is never listed. Read-only; same data as `herman last [project|--all] [--json]`
+- **Access** keys, SSH keys and hosts, git identity, credentials, live SSH connections, and
+  **Integrations**: chat platforms (token, `enabled`, platform settings) and web search/extract
+  backends with one key per provider
+- **MCP** the servers in a project's `mcp_servers` with add, enable/disable, remove, and every
+  `hermes mcp` subcommand with whether it opens a connection
+- **Maintenance** backups, disk space, **This project** (names the project its buttons will act on)
+  and **About**: the version card, *Check for updates* and *Update now*
 
-Notes: the panel listens on loopback only, and everything inside it that changes state asks you to
-type a name first (a delete, a rename, a removed MCP server, a dropped key, an installed skill and
-erasing the built-in memory all ask for the name they are about to touch). Searching skills is the one
-action that reaches the network, and it runs only when you press Search. A write never happens on a page load: every one of them is a POST, and the
-panel builds the same `herman config` command the CLI accepts instead of editing a file itself. The Hermes
-dashboard (chat, config, keys, MCP, webhooks) stays at `hermes dashboard`, port 9119.
+Notes: loopback only. Everything that changes state asks you to type the name it is about to touch,
+and every write is a POST — the panel builds the same `herman config` command the CLI accepts instead
+of editing a file itself. Searching skills is the only action that reaches the network, and only when
+you press Search. The Hermes dashboard (chat, config, keys, MCP, webhooks) stays at
+`hermes dashboard`, port 9119.
 
 ## Docker
 
-For any OS with Docker (Linux, macOS, Windows with Docker Desktop). The image contains Hermes and
-herman; your Hermes data comes from the host mount, so the panel shows your own projects.
+For any OS with Docker. The image contains Hermes and herman; your Hermes data comes from the host
+mount, so the panel shows your own projects.
 
 ```sh
 docker compose up --build                      # panel at http://127.0.0.1:9120
@@ -223,60 +202,42 @@ docker run --rm -v "$HOME/.hermes:/home/herman/.hermes" -p 127.0.0.1:9120:9120 h
 docker run --rm -it -v "$HOME/.hermes:/home/herman/.hermes" herman -l
 ```
 
-- the port mapping keeps the panel on your machine; keep it that way unless you front it with a
-  reverse proxy
-- mount `~/.hermes` read-only (add `:ro`) for a view-only panel: listing, usage, insights and search
-  keep working, actions that write will refuse
-- `Enter session` and the terminal window need a desktop, so run those from the host CLI
-- the engine version inside the image can drift from your host install:
-  `docker build --build-arg HERMES_BRANCH=<branch> -t herman .` pins it
-- the code is baked into the image, so after pulling changes run `docker compose up --build` again
-- inside the container the per-project shortcut commands are not needed and not reported as missing;
-  the engine binary, profiles and data still come from your own installation and mount
+- keep the port mapping on your machine unless you front it with a reverse proxy
+- mount `~/.hermes` read-only (`:ro`) for a view-only panel: listing, usage, insights and search keep
+  working, writes refuse
+- `Enter session` and the terminal window need a desktop: run those from the host CLI
+- the engine inside the image can drift from your host install: `--build-arg HERMES_BRANCH=<branch>`
+- the code is baked into the image, so re-run `docker compose up --build` after pulling changes
 
 ## Troubleshooting
 
 - `herman: command not found`: add `~/.local/bin` to your `PATH`.
 - The panel looks stale after an upgrade: `herman web --stop && herman web` (Python is kept in memory).
-- A tab says its panel session ended: the token was rotated (`herman web --new-token`), or that
-  browser's site data was cleared. Reopen the panel from the taskbar icon, or from
-  `herman web --url`.
+- A tab says its panel session ended: the token was rotated or that browser's site data was cleared.
+  Reopen the panel from the taskbar icon, or from `herman web --url`.
 - Port already in use: `herman web --port 9121`.
-- `gateway: stopped` on a project: no messaging gateway (Telegram, Discord, ...) runs for it. Harmless.
-- A session is stuck: `herman kill <project>`, or `herman kill <project> <session-id>`.
-- The Hermes dashboard at `127.0.0.1:9119` shows nothing: nothing is listening there. herman's
-  **Open dashboard** button (in Maintenance) starts it on demand; to keep it up without clicking, run
-  the engine as a user service: `cp hermes-dashboard.service ~/.config/systemd/user/ &&
-  systemctl --user enable --now hermes-dashboard.service` (check the `ExecStart` path against
-  `which hermes` first).
+- `gateway: stopped` on a project: no messaging gateway runs for it. Harmless.
+- A session is stuck: `herman kill <project> [session-id]`.
+- The Hermes dashboard at `127.0.0.1:9119` shows nothing: nothing is listening there. herman's **Open
+  dashboard** button starts it on demand; to keep it up, `cp hermes-dashboard.service
+  ~/.config/systemd/user/ && systemctl --user enable --now hermes-dashboard.service` (check the
+  `ExecStart` path against `which hermes` first).
 
 ## Keeping your data out of the history
 
-herman keeps everything it knows about you outside this repository: profiles and sessions live in
-`~/.hermes`, while the panel token, the pid file and your project descriptions live in
-`~/.cache/herman/`. Nothing user-owned is ever written into the working tree, and `.gitignore`
-covers the runtime files a stray copy could drop there.
+Profiles and sessions live in `~/.hermes`; the panel token, the pid file and your project
+descriptions live in `~/.cache/herman/`. Nothing user-owned is ever written into the working tree.
 
 The release gate is `preflight.py`: it scans the files you are about to publish for personal paths,
 hosts, secrets, session ids, **your own project descriptions** and the panel token, and exits 1 on
-anything blocking. Install it as a git hook so it runs on every commit:
+anything blocking. `python3 preflight.py --install-hook .` installs it as a pre-commit hook, so a
+description you typed in the panel cannot reach your history by accident (it also refuses the names
+of your projects, matched on word boundaries). `panel-syntax-check.sh` parses the panel's JavaScript
+with `node --check` — a syntax error in one branch takes the whole script down and the page renders
+nothing while every API route keeps answering. `herman security` runs both.
 
-```sh
-python3 preflight.py --install-hook .        # writes .git/hooks/pre-commit
-```
-
-The hook scans what you staged and refuses the commit, so a description you typed in the panel (or
-any other operator data) cannot reach your history by accident. It also refuses the names of your
-projects (matched on word boundaries), so a log line, an example or a screenshot caption cannot hand
-out the shape of your machine.
-
-Next to it, `panel-syntax-check.sh` parses the panel's JavaScript with `node --check`. That check is
-not cosmetic: a syntax error in one branch takes the whole script down, and the page then renders
-nothing at all while every API route keeps answering, so the panel looks empty and the server looks
-healthy. `herman security` runs it as one of its checks.
-
-Images are the one thing a text scanner cannot read: `preflight.py` says so rather than reporting
-them clean, so look at every screenshot before a release and take it from a throwaway HOME
+Images are the one thing a text scanner cannot read, so `preflight.py` says so instead of reporting
+them clean: take screenshots from a throwaway HOME
 (`env -u HERMES_HOME HOME=/tmp/shots herman web --port 9123`), where no real project name, path or
 usage total exists to be captured.
 

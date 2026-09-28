@@ -161,6 +161,33 @@ def main() -> int:
         st, _h, _b = call("POST", f"/api/action?t={token}&{query}", port=port, host=host)
         check(f"{label} is refused", st, 400)
 
+    # ---- herman updating itself ---------------------------------------------------------------
+    # Only refusals are probed: this battery must never START an update, or a passing run would
+    # replace the installed copy it is meant to protect. The update source is not a request
+    # parameter at all (the handler never reads one), so a caller cannot point herman at another
+    # repository - the source is the constant the installed copy was built with.
+    st, _h, _b = call("GET", "/api/update", port=port, host=host)
+    check("the update status needs a token", st, 403)
+    st, _h, _b = call("GET", f"/api/update?t={token}&cached=1", port=port, host=host)
+    check("the cached update status is answered without touching the network", st, 200)
+    st, _h, _b = call("GET", f"/api/update-log?t={token}", port=port, host=host)
+    check("the update progress is readable with a token", st, 200)
+    st, _h, _b = call("GET", f"/api/update?t={token}&confirm=update", port=port, host=host)
+    check("an update over GET is refused", st, 405)
+    st, _h, _b = call("POST", f"/api/update?t={token}", port=port, host=host)
+    check("an update without the typed confirmation is refused", st, 400)
+    st, _h, _b = call("POST", f"/api/update?t={token}&confirm=yes", port=port, host=host)
+    check("an update confirmed with the wrong word is refused", st, 400)
+
+    # ---- Insights > Last session (closed sessions) ---------------------------------------------
+    # Read-only by design: these probes only prove the endpoint sits behind the token.
+    st, _h, _b = call("GET", "/api/last-sessions", port=port, host=host)
+    check("the closed-session list needs a token", st, 403)
+    st, _h, _b = call("GET", f"/api/last-sessions?t={token}&brief=1", port=port, host=host)
+    check("the closed-session list is served with a token", st, 200)
+    st, _h, _b = call("GET", f"/api/last-session?t={token}&name=no-such-project", port=port, host=host)
+    check("a closed-session read for an unknown project is refused", st, 400)
+
     # ---- the configure board: every write is POST-only and shape-checked before argv -----------
     # Each case below must be REFUSED, so a passing run changes nothing on the machine: that is what
     # makes this battery safe to re-run after any change to the handler or the panel JS.

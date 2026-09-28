@@ -52,7 +52,7 @@ def in_container() -> bool:
     if os.environ.get("HERMAN_IN_CONTAINER"):
         return True
     return any(Path(p).exists() for p in ("/.dockerenv", "/run/.containerenv"))
-VERSION = "0.4"
+VERSION = "0.5"
 AUTHOR = ""            # no personal name in a public repo
 REPO = "https://github.com/levay08/herman"   # shown wherever the old byline used to be
 TAGLINE = "hermes-agent · simple task manager"
@@ -190,6 +190,19 @@ CATALOG_CACHE = HERMAN_CACHE / "models-cache.json"
 PID_FILE = HERMAN_CACHE / "web.pid"
 THIS_FILE = Path(__file__).resolve()
 HERMES_BIN = shutil.which("hermes") or "hermes"
+
+# --- self-update (`herman update`, and the button in Maintenance > About) ---------------------
+# herman updates ITSELF and only its own files: the CLI, the page, the icons, the battery and the
+# shell completion inside the install prefix (~/.local by default). Every project, profile, session,
+# memory, skill and setting lives in ~/.hermes, which an update never writes - so "update herman"
+# can never cost the operator a project.
+UPDATE_DIR = HERMAN_CACHE / "update"        # staging clone, progress file, backups, helper log
+UPDATE_STAGE = UPDATE_DIR / "stage"         # `git clone --depth 1` of the update source
+UPDATE_STATE = UPDATE_DIR / "state.json"    # written by the detached helper, polled by the panel
+UPDATE_JOB = UPDATE_DIR / "job.json"        # what the helper is asked to do (kept for diagnosis)
+UPDATE_HELPER = UPDATE_DIR / "apply.py"     # generated on every run: it must outlive the panel
+UPDATE_CHECK_TTL = 600                      # seconds a check verdict is reused before asking again
+PANEL_UNIT = f"{PROG}-web.service"          # the user unit the installer documents
 
 
 # ------------------------------------------------------------------- util ---
@@ -2037,6 +2050,22 @@ ENTER & SELECT (long spellings, same thing)
   {PROG} --logs <name> [-f]         view a project log
   {PROG} --audit [name]             memory + skills summary (stray markers)
   {PROG} --unused [days]            projects idle for N days
+  {PROG} last [name] [--all]        closed sessions: last prompt + last result, rolling 24 h
+     only CLOSED sessions are listed - a session that is still running has no "last" record yet.
+     --within <minutes> narrows the window, --limit N caps the list, --json prints the full text
+
+{bold("SELF-UPDATE")}
+  {PROG} update --check             is a newer {PROG} published? (installed vs {REPO})
+  {PROG} update [--yes] [--dry-run] install the newest {PROG} over the one installed here
+  {PROG} update --no-restart        leave the panel alone (restart it yourself)
+     an update moves {PROG}'s OWN scripts only (~/.local/bin/{PROG}, the panel page and its assets, the
+     shell completion) inside the install prefix. {ROOT} - every project, its sessions, memory,
+     skills and settings - is NEVER written, so an update cannot lose or alter your data. The files
+     it replaces are backed up first, and the new copy re-checks your data once (sync --fix) so a
+     feature added in the new version finds what it needs.
+     Live Hermes sessions do not block an update and are not stopped by it: profiles are separate
+     from {PROG}, so a running session keeps running and stays on its project card.
+     The panel button in Maintenance > About runs exactly this.
 
 {bold("MODEL, GIT & ACCESS")}
   {PROG} model [name]                show the project model + provider
@@ -3502,6 +3531,53 @@ def cmd_web(argv: list[str]):
             if u.path == "/api/health":
                 self._json({"ok": True, "tool": PROG, "version": VERSION,
                             "author": AUTHOR, "repo": REPO})
+                return
+            if u.path in ("/api/update", "/api/herman-update"):
+                # herman updating itself. GET is the read side and never reaches the network on its
+                # own: it answers from the cached verdict unless the operator pressed the button
+                # (?refresh=1). The write side is POST-only and pinned to the repo `herman` was built
+                # with - the browser can never name a source, so a stolen token cannot point an
+                # update at somebody else's git URL.
+                if method == "POST" or "confirm" in q:
+                    if method != "POST":
+                        self._json({"error": "'update' changes state: send it with POST"}, 405)
+                        return
+                    if (q.get("confirm", [""])[0] or "") != "update":
+                        self._json({"error": "confirmation mismatch: type 'update' to confirm"}, 400)
+                        return
+                    try:
+                        here = int(self.server.server_address[1])
+                    except (AttributeError, IndexError, TypeError, ValueError):
+                        here = 0
+                    res = start_update(panel_port=here or None)
+                    self._json(res, 200 if res.get("ok") else 409)
+                    return
+                self._json(update_check(refresh="refresh" in q, cached_only="cached" in q))
+                return
+            if u.path in ("/api/update-log", "/api/herman-update-log"):
+                self._json(update_log())
+                return
+            if u.path in ("/api/last-sessions", "/api/last-session"):
+                # Closed sessions only, read-only: a session that is still running has no "last"
+                # record, so live leases are skipped. Nothing here writes to state.db.
+                if u.path == "/api/last-session":
+                    nm_last = (q.get("name", [""])[0] or "").strip()
+                    if not nm_last or not profile_exists(nm_last):
+                        self._json({"error": f"project '{nm_last or '?'}' does not exist"}, 400)
+                        return
+                    sid = (q.get("session", [""])[0] or "").strip()
+                    rep_last = last_session_report(nm_last, want_tail=True)
+                    hit = (next((e for e in rep_last["sessions"] if e["session"] == sid), None)
+                           if sid else (rep_last["sessions"][0] if rep_last["sessions"] else None))
+                    self._json(hit if hit else {"error": rep_last.get("error") or "no closed session",
+                                                "project": nm_last}, 200 if hit else 404)
+                    return
+                try:
+                    minutes = int(q.get("within", ["0"])[0] or 0)
+                except (TypeError, ValueError):
+                    minutes = 0
+                self._json(last_sessions_report(None, within=(minutes * 60) or LAST_WINDOW_SECONDS,
+                                                brief="brief" in q))
                 return
             if u.path == "/api/status":
                 self._json({
@@ -8437,6 +8513,926 @@ def do_sync(*, fix: bool = False, dry: bool = False, as_json: bool = False) -> d
     return res
 
 
+# ------------------------------------------------------------ last session ---
+# What CLOSED sessions left behind: the last prompt, the last result, and the state the transcript
+# was in when the session (or its terminal) went away. A session that is still running has no such
+# record - its transcript is still being written - so live leases are skipped here by design.
+#
+# Read-only: this reads the same state.db that History and Insights read and writes nothing.
+#
+# The window: herman keeps a ROLLING 24 hours of closes - every session closed inside it is listed
+# (two closes are two entries, not just the newest), grouped by day so "what happened today" reads
+# as one list. Nothing is stored to make that work: the window is computed from the clock, so a
+# record older than 24 hours drops out on its own and the next close takes its place. A project with
+# nothing closed inside the window still gets its most recent close, marked as outside the window.
+# A close from the last hour is flagged "fresh" so the page can point at what just happened.
+
+LAST_WINDOW_SECONDS = 24 * 3600
+LAST_FRESH_SECONDS = 3600
+LAST_LIMIT_PER_PROJECT = 50
+
+# Rows Hermes injected as a user message rather than something the operator typed.
+_INJECTED_HINTS = ("[important", "matched watch pattern", "<task-notification", "[system",
+                   "[background process")
+
+
+def clip(text: str, limit: int = 200) -> str:
+    """One-line excerpt for a table cell or a terminal line."""
+    flat = " ".join((text or "").split())
+    return flat if len(flat) <= limit else flat[: max(limit - 1, 8)] + "…"
+
+
+def _decode_tool_calls(raw) -> list[dict]:
+    """`tool_calls` JSON → ``[{name, args}]`` (OpenAI-shaped, best effort)."""
+    out: list[dict] = []
+    try:
+        calls = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return out
+    if isinstance(calls, dict):
+        calls = calls.get("tool_calls") or [calls]
+    for call in (calls or []):
+        if not isinstance(call, dict):
+            continue
+        fn = call.get("function") if isinstance(call.get("function"), dict) else call
+        name = str(fn.get("name") or call.get("name") or "").strip() or "tool"
+        args = fn.get("arguments") or call.get("arguments") or ""
+        if isinstance(args, (dict, list)):
+            args = json.dumps(args, ensure_ascii=False)
+        out.append({"name": name, "args": str(args)[:4000]})
+    return out
+
+
+def _tool_result_text(raw) -> str:
+    """The human part of a tool result: its output/content, else the raw JSON."""
+    text = (raw or "").strip()
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return text
+    if isinstance(data, dict):
+        for key in ("output", "content", "text", "message", "error", "diff"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return text or json.dumps(data, ensure_ascii=False)[:4000]
+
+
+def is_injected_prompt(text: str) -> bool:
+    """True for a user row Hermes injected (watch hit, background process, task note)."""
+    head = (text or "").lstrip()[:200].lower()
+    return any(head.startswith(hint) for hint in _INJECTED_HINTS)
+
+
+def _last_result_from(rows: list[dict]) -> dict | None:
+    """Classify the newest row of a closed session: what was on screen when it ended."""
+    if not rows:
+        return None
+    top = rows[0]
+    role, content = str(top.get("role") or ""), str(top.get("content") or "")
+    at = top.get("timestamp")
+    if role == "assistant":
+        calls = _decode_tool_calls(top.get("tool_calls"))
+        if calls:
+            return {"kind": "tool_call", "at": at, "tool": calls[0]["name"],
+                    "args": calls[0]["args"], "text": content, "calls": [c["name"] for c in calls],
+                    "note": "the call was in flight: its result was never written"}
+        return {"kind": "answer", "at": at, "tool": "", "args": "", "text": content, "calls": [],
+                "note": "the last answer the session produced"}
+    if role == "tool":
+        return {"kind": "tool_output", "at": at, "tool": str(top.get("tool_name") or ""),
+                "args": "", "text": _tool_result_text(content), "calls": [],
+                "note": "the tool had answered; the reply to it was never written"}
+    if role == "user":
+        return {"kind": "awaiting_answer", "at": at, "tool": "", "args": "", "text": content,
+                "calls": [], "note": "the prompt was stored; no answer was recorded"}
+    return {"kind": role or "unknown", "at": at, "tool": str(top.get("tool_name") or ""), "args": "",
+            "text": content, "calls": [], "note": ""}
+
+
+def last_session_report(name: str, *, within: int = LAST_WINDOW_SECONDS,
+                        limit: int = LAST_LIMIT_PER_PROJECT, tail: int = 8,
+                        want_tail: bool = False) -> dict:
+    """Closed sessions of one project, newest first: last prompt + last result for each."""
+    home = profile_home(name)
+    out = {"project": name, "sessions": [], "window_s": within, "db": str(home / "state.db"),
+           "error": "", "live_skipped": 0}
+    con = _sqlite_ro(home / "state.db")
+    if con is None:
+        out["error"] = "no state.db yet"
+        return out
+    try:
+        live_ids = _live_session_ids(name)
+        now = time.time()
+        cands = []
+        for row in con.execute(
+                """select id, title, model, cwd, started_at, ended_at, end_reason, message_count,
+                          tool_call_count, estimated_cost_usd, actual_cost_usd,
+                          coalesce(last_activity_at, 0) as last_activity_at
+                     from sessions order by coalesce(last_activity_at, started_at) desc limit 200"""):
+            if str(row["id"]) in live_ids:
+                out["live_skipped"] += 1
+                continue                      # still running: it has no "last" record yet
+            cands.append(row)
+        picked: list[tuple] = []
+        in_window = 0
+        for row in cands:
+            messages = [dict(m) for m in con.execute(
+                """select id, role, tool_name, substr(coalesce(content, ''), 1, 4000) as content,
+                          tool_calls, finish_reason, timestamp
+                     from messages
+                    where session_id = ? and coalesce(display_kind, '') <> 'hidden'
+                    order by id desc limit ?""", (str(row["id"]), max(tail, 12)))]
+            last_active = (messages[0]["timestamp"] if messages
+                           else (row["last_activity_at"] or row["started_at"]))
+            closed_at = row["ended_at"] or last_active
+            age = max(0.0, now - float(closed_at or now))
+            recent = age <= within
+            if not recent and in_window:
+                continue                      # window rows already found: keep the fallback list short
+            if not recent and picked:
+                continue
+            prompt = next((m for m in messages
+                           if m["role"] == "user" and (m["content"] or "").strip()), None)
+            entry = {
+                "project": name, "session": str(row["id"]), "title": row["title"] or "",
+                "model": row["model"] or "", "cwd": row["cwd"] or "",
+                "started_at": row["started_at"], "closed_at": closed_at, "age_s": age,
+                "in_window": recent, "fresh": age <= LAST_FRESH_SECONDS,
+                "day": time.strftime("%Y-%m-%d", time.localtime(float(closed_at or now))),
+                "end_reason": row["end_reason"],
+                "closed": "clean" if row["end_reason"] else "no clean end",
+                "messages": int(row["message_count"] or 0),
+                "tools": int(row["tool_call_count"] or 0),
+                "cost": (row["actual_cost_usd"] if row["actual_cost_usd"] is not None
+                         else row["estimated_cost_usd"]),
+                "last_active": last_active,
+                "last_prompt": ({"at": prompt["timestamp"], "text": prompt["content"],
+                                 "injected": is_injected_prompt(prompt["content"])}
+                                if prompt else None),
+                "last_result": _last_result_from(messages),
+            }
+            if want_tail:
+                entry["tail"] = [{"at": m["timestamp"], "role": m["role"],
+                                  "tool": m["tool_name"] or "",
+                                  "text": clip(_tool_result_text(m["content"])
+                                               if m["role"] == "tool" else (m["content"] or ""), 700),
+                                  "finish": m["finish_reason"] or "",
+                                  "calls": [c["name"] for c in _decode_tool_calls(m["tool_calls"])]}
+                                 for m in reversed(messages)]
+            picked.append((recent, age, entry))
+            in_window += 1 if recent else 0
+            if len(picked) >= max(limit, 1):
+                break
+        out["sessions"] = [e for _recent, _age, e in picked]
+        out["in_window"] = in_window
+        out["closed_total"] = len(cands)
+        if not out["sessions"]:
+            out["error"] = "no closed session yet"
+    except sqlite3.Error as exc:
+        out["error"] = f"could not read the session table: {exc}"
+    finally:
+        con.close()
+    return out
+
+
+def last_sessions_report(names: list[str] | None = None, *, within: int = LAST_WINDOW_SECONDS,
+                         limit: int = LAST_LIMIT_PER_PROJECT, want_tail: bool = False,
+                         brief: bool = False) -> dict:
+    """Every closed session on this machine, window rows first, newest first."""
+    projects = names if names is not None else list_profiles()
+    rows: list[dict] = []
+    for name in projects:
+        rep = last_session_report(name, within=within, limit=limit, want_tail=want_tail)
+        rows.extend(rep["sessions"])
+    if brief:
+        # The board shows excerpts; the full text travels only when one session is opened.
+        for entry in rows:
+            for key in ("last_prompt", "last_result"):
+                block = entry.get(key)
+                if not isinstance(block, dict):
+                    continue
+                if not block.get("text") and block.get("args"):
+                    # A call that was still in flight carries no answer text: show the command.
+                    block["text"] = "was running: " + block["args"]
+                if block.get("text"):
+                    block["text"] = clip(block["text"], 300)
+                if block.get("args"):
+                    block["args"] = clip(block["args"], 300)
+            entry.pop("tail", None)
+    rows.sort(key=lambda e: (not e["in_window"], not e["fresh"], -(float(e["closed_at"] or 0))))
+    return {"sessions": rows, "window_s": within, "generated_at": time.time(),
+            "in_window": sum(1 for e in rows if e["in_window"]),
+            "fresh": sum(1 for e in rows if e["fresh"]), "projects": len(projects)}
+
+
+def do_last(name: str | None = None, *, everything: bool = False, within: int = LAST_WINDOW_SECONDS,
+            limit: int = LAST_LIMIT_PER_PROJECT, as_json: bool = False,
+            compact: bool | None = None) -> dict:
+    """CLI entry point for `herman last` (closed sessions: last prompt, last result)."""
+    if compact is None:
+        compact = everything                 # --all is a fleet list: one line per session
+    if everything:
+        data = last_sessions_report(None, within=within, limit=limit, want_tail=False)
+    else:
+        nm = name or active_profile() or load_state().get("last") or DEFAULT_HERMES
+        if not profile_exists(nm):
+            die(f"project '{nm}' does not exist (try: {PROG} -l)")
+        rep = last_session_report(nm, within=within, limit=limit, want_tail=True)
+        data = {"sessions": rep["sessions"], "window_s": within, "generated_at": time.time(),
+                "in_window": rep.get("in_window", 0), "projects": 1, "error": rep.get("error", "")}
+    if as_json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        return data
+    sessions = data["sessions"]
+    total = len(sessions)
+    sessions = sessions[:limit]
+    print(f"{bold(PROG + ' last')} · closed sessions"
+          + ("" if everything else f" of {name or active_profile() or DEFAULT_HERMES}")
+          + f"  (rolling {int(within // 3600)} h window, newest first)")
+    if not sessions:
+        print(dim("  nothing yet: no session has been closed on this machine"))
+        return data
+    if compact:
+        for e in sessions:
+            res = e["last_result"] or {}
+            excerpt = res.get("text") or (e["last_prompt"] or {}).get("text") or ""
+            where = f" · {res['tool']}" if res.get("tool") else ""
+            mark = "·" if e["fresh"] else (" " if e["in_window"] else "o")
+            print(f"    {mark} {e['project']:<12} {human_time(e['last_active']):>11}  {e['session']}"
+                  f"  {(res.get('kind') or '-'):<16}{where:<13} {clip(excerpt, 58)}")
+        print(dim(f"  {len(sessions)} of {total} shown · `{PROG} last <project>` for the full blocks"
+                  f" · --limit N for more · --json for everything"))
+        return data
+    for e in sessions:
+        fresh = " · closed in the last hour" if e["fresh"] else (
+            "" if e["in_window"] else " · older close (outside the window)")
+        print(f"    {e['project']}  ·  {e['session']}{fresh}")
+        print(f"      last active  {human_time(e['last_active'])}   ({e['closed']}"
+              + (f", {e['end_reason']}" if e["end_reason"] else "") + f", ended {human_time(e['closed_at'])})")
+        print(f"      stored       {e['messages']} messages · {e['tools']} tool calls"
+              + (f" · ${e['cost']:.4f}" if isinstance(e["cost"], (int, float)) else "")
+              + (f" · {clip(e['title'], 60)}" if e["title"] else ""))
+        lp = e["last_prompt"]
+        if lp:
+            print(f"      prompt       {'[injected] ' if lp['injected'] else ''}{clip(lp['text'], 108)}")
+        lr = e["last_result"]
+        if lr:
+            where = f" · {lr['tool']}" if lr["tool"] else ""
+            print(f"      result       {lr['kind']}{where}   ({lr['note']})")
+            if lr["kind"] == "tool_call" and lr["args"]:
+                print(dim(f"                   was running: {clip(lr['args'], 108)}"))
+            if lr["text"]:
+                print(f"                   {clip(lr['text'], 108)}")
+        if e.get("tail"):
+            print(dim("      tail         " + " | ".join(
+                (t["role"] + (f":{t['tool']}" if t["tool"] else "")) for t in e["tail"][-4:])))
+    print(dim(f"  {len(sessions)} of {total} shown · {data['in_window']} inside the window · "
+              f"--limit N for more, --json for the full text"))
+    return data
+
+
+# ---------------------------------------------------------- self-update ---
+# herman updates ITSELF. The source is the public repo (REPO) cloned at depth 1; the files that move
+# are herman's own (CLI, page, icons, completion) inside the install prefix. Nothing under
+# ~/.hermes is written, so no project, session, memory or skill can be touched by an update.
+#
+# The one step that cannot run in-process is the panel restart: the process serving the request is
+# the process being replaced. So the work goes to a detached helper (its own systemd scope, outside
+# the panel's cgroup) and the panel only polls a progress file - which is also what keeps the
+# browser tab alive across the restart: the page sees "restarting", never a dead connection, and
+# reloads itself once the new panel answers.
+
+_UPDATE_HELPER_SRC = r'''#!/usr/bin/env python3
+"""Detached half of `herman update` (generated by the CLI when an update starts).
+
+An update replaces the files the panel serves from, and the panel must restart to load them - and
+that restart kills the process that would otherwise report the result. This helper therefore runs in
+its own scope: it backs up the files it is about to replace, runs the installer, checks the
+installed copy, restarts the panel, waits until the new panel answers, and writes every step into a
+state file the panel polls. It touches herman's own files only - never ~/.hermes, hence never a
+project. argv[1] is the JSON job description herman wrote; it is kept for diagnosis.
+"""
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+JOB = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+STATE = Path(JOB["state"])
+LOG = Path(JOB["log"])
+STAGE = Path(JOB["stage"])
+PREFIX = Path(JOB["prefix"])
+BACKUP = Path(JOB["backup"])
+
+INSTALLED_FILES = (
+    "bin/herman",
+    "share/herman/index.html",
+    "share/herman/icons.svg",
+    "share/herman/icons.LICENSE.txt",
+    "share/herman/security_check.py",
+    "share/herman/preflight.py",
+    "share/herman/panel-syntax-check.sh",
+    "share/herman/caduceus.png",
+    "share/bash-completion/completions/herman",
+)
+
+
+def say(line: str) -> None:
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a", encoding="utf-8") as fh:
+            fh.write(str(line).rstrip("\n") + "\n")
+    except OSError:
+        pass
+
+
+def step(state: str, note: str = "", **extra) -> None:
+    """Publish one progress step; the panel reads exactly this file."""
+    payload = {"state": state, "note": note, "ts": time.time(), "was": JOB.get("was"),
+               "target": JOB.get("target"), "log": str(LOG), "backup": str(BACKUP),
+               "stage": str(STAGE), "prefix": str(PREFIX), "sessions": JOB.get("sessions")}
+    payload.update(extra)
+    try:
+        STATE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def run(argv, **kw):
+    say("$ " + " ".join(str(a) for a in argv))
+    try:
+        return subprocess.run([str(a) for a in argv], capture_output=True, text=True,
+                              timeout=600, **kw)
+    except Exception as exc:            # reported, never raised: the panel must see an outcome
+        say(f"! {exc}")
+        return None
+
+
+def backup_files() -> list:
+    """Copy every file the installer overwrites, so a rollback is one copy back."""
+    BACKUP.mkdir(parents=True, exist_ok=True)
+    kept = []
+    for rel in INSTALLED_FILES:
+        src = PREFIX / rel
+        if not src.exists():
+            continue
+        dst = BACKUP / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        kept.append(rel)
+    (BACKUP / "RESTORE.txt").write_text(
+        f"herman {JOB.get('was')} files, copied before the update to {JOB.get('target')}.\n"
+        f"Roll back with:\n"
+        f"  cp -a {BACKUP}/bin/. {PREFIX}/bin/\n"
+        f"  cp -a {BACKUP}/share/. {PREFIX}/share/\n"
+        f"  systemctl --user restart {JOB.get('unit') or 'herman-web.service'}\n",
+        encoding="utf-8")
+    return kept
+
+
+def installed_version() -> str:
+    """The version the freshly installed CLI reports (not what the job claims)."""
+    res = run([sys.executable, str(PREFIX / "bin" / "herman"), "--version"])
+    text = ((res.stdout or "") + (res.stderr or "")) if res else ""
+    for chunk in text.split():
+        if chunk[:1].isdigit() and "." in chunk:
+            return chunk.strip()
+    return ""
+
+
+def panel_up(deadline: float) -> dict:
+    """Poll the panel until it answers; a 401/403 still proves a server is listening."""
+    token = ""
+    try:
+        token = Path(JOB["token_file"]).read_text(encoding="utf-8").strip()
+    except (OSError, KeyError):
+        pass
+    port = int((JOB.get("panel") or {}).get("port") or 9120)
+    url = f"http://127.0.0.1:{port}/api/health" + (f"?t={token}" if token else "")
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                return {"up": True, "version": str(body.get("version") or "")}
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                return {"up": True, "version": ""}
+        except Exception:
+            pass
+        time.sleep(1.0)
+    return {"up": False, "version": ""}
+
+
+def has_tty(pid: int) -> bool:
+    """True when that process owns a terminal (an operator's foreground panel, not a service)."""
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+        return int(fields[4]) != 0            # tty_nr, first field after state
+    except (OSError, IndexError, ValueError):
+        return False
+
+
+def restart_panel() -> str:
+    """Restart the panel under its own supervisor; never kill a terminal the operator owns."""
+    unit = JOB.get("unit") or ""
+    panel = JOB.get("panel") or {}
+    pid = int(panel.get("pid") or 0)
+    if unit:
+        res = run(["systemctl", "--user", "restart", unit])
+        if res is not None and res.returncode == 0:
+            return f"restarted {unit}"
+        return f"restarting {unit} failed: {((res.stderr if res else '') or '').strip()[:200]}"
+    if pid and pid > 1:
+        if has_tty(pid):
+            return (f"the panel (pid {pid}) runs in a terminal: restart it there to load "
+                    f"{JOB.get('target')}")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError as exc:
+            return f"could not stop the panel (pid {pid}): {exc}"
+        for _ in range(100):
+            if not Path(f"/proc/{pid}").exists():
+                break
+            time.sleep(0.2)
+        argv = [sys.executable, str(PREFIX / "bin" / "herman"), "web", "--no-open",
+                "--port", str(panel.get("port") or 9120)]
+        host = str(panel.get("host") or "")
+        if host and host not in ("127.0.0.1", "localhost"):
+            argv += ["--host", host]
+        try:
+            # Keep the relaunched panel's output: it used to go to /dev/null, so a traceback from
+            # the new panel was unreadable the moment the helper exited.
+            sink = (LOG.parent / "panel.log").open("ab")
+            subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        except OSError as exc:
+            return f"could not relaunch the panel: {exc}"
+        return f"relaunched the panel (was pid {pid})"
+    return "no panel was running: start it again to load the new version"
+
+
+def main() -> int:
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    say(f"= herman self-update {JOB.get('was')} -> {JOB.get('target')} ({time.ctime()})")
+    # Second copy of the same guard the CLI applies, because THIS is the process that writes: an
+    # update may never install into a Hermes home (that is where the projects and their data live).
+    home = Path(JOB.get("hermes_home") or (Path.home() / ".hermes"))
+    if str(PREFIX) == str(home) or str(PREFIX).startswith(str(home) + os.sep):
+        step("error", f"refusing to install into {PREFIX}: that is the Hermes home",
+             error="the install prefix points into the Hermes home")
+        return 1
+    step("backup", "copying the files that are about to be replaced")
+    kept = backup_files()
+    say(f"· backed up {len(kept)} file(s) to {BACKUP}")
+
+    step("install", f"installing herman {JOB.get('target')} into {PREFIX}")
+    res = run(["/bin/sh", str(STAGE / "install.sh")], env={**os.environ, "PREFIX": str(PREFIX)})
+    say(((res.stdout or "") + (res.stderr or "")).strip() if res else "")
+    if res is None or res.returncode != 0:
+        step("error", "the installer failed: nothing was replaced",
+             error=f"install.sh exited {res.returncode if res else '?'}",
+             detail=((res.stderr if res else '') or '').strip()[-600:])
+        return 1
+
+    step("verify", "checking the installed copy")
+    got = installed_version()
+    if got != JOB.get("target"):
+        step("error", f"the installed copy reports {got or 'nothing'}, expected {JOB.get('target')}",
+             error="the installed copy did not report the new version")
+        return 1
+    say(f"· installed copy reports {got}")
+
+    # Let the NEW copy look at this machine once, before the panel comes up: new features read the
+    # operator's existing data (profiles, sessions, caches, shortcuts), and this is what reconciles
+    # it - missing state entries and shortcut wrappers are written, stale ones are dropped. It
+    # never touches a project's own files; a failure here is reported, not fatal.
+    step("adapt", "bringing your data up to date with the new version")
+    res = run([sys.executable, str(PREFIX / "bin" / "herman"), "sync", "--fix", "--plain"])
+    adapted = ""
+    for line in reversed(((res.stdout if res else "") or "").splitlines()):
+        if line.strip():
+            adapted = line.strip()
+            break
+    if res is None or res.returncode != 0:
+        say("! sync --fix did not finish; the install is intact, re-run it by hand")
+    else:
+        say(f"· {adapted}")
+
+    step("restart", "restarting the panel so it serves the new version")
+    note = restart_panel() if JOB.get("restart") else "skipped (--no-restart)"
+    say("· " + note)
+
+    step("health", "waiting for the panel to answer")
+    health = panel_up(time.time() + 45)
+    if JOB.get("restart") and int((JOB.get("panel") or {}).get("pid") or 0) and not health["up"]:
+        step("error", "the panel did not come back within 45s",
+             error="the panel did not answer after the restart", restarted=note)
+        return 1
+
+    shutil.rmtree(STAGE, ignore_errors=True)      # the previous version's clone goes away
+    step("done", f"herman {JOB.get('target')} installed", version=got,
+         panel_version=health.get("version", ""), up=health["up"], restarted=note,
+         adapted=adapted, removed=[str(STAGE)])
+    say("= done")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as exc:          # a crash must still publish an outcome, or the page waits
+        step("error", "the update helper crashed", error=str(exc))
+        raise
+'''
+
+
+def update_source() -> str:
+    """Where an update is fetched from: the public repo, or HERMAN_UPDATE_SOURCE (mirror/test seam)."""
+    return (os.environ.get("HERMAN_UPDATE_SOURCE") or "").strip() or REPO
+
+
+def version_tuple(text: str) -> tuple:
+    """Version → comparable tuple: '0.4.1' > '0.4'. A non-numeric tail ends the parse."""
+    parts = []
+    for chunk in re.split(r"[._\-+]", (text or "").strip()):
+        m = re.match(r"^\d+", chunk)
+        if not m:
+            break
+        parts.append(int(m.group(0)))
+    return tuple(parts) or (0,)
+
+
+def version_in_file(path: Path) -> str:
+    """The VERSION constant inside a herman script (the installed one or a staged clone)."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    m = re.search(r'^VERSION\s*=\s*"([^"]*)"', text, re.M)
+    return m.group(1) if m else ""
+
+
+def install_prefix() -> Path:
+    """The prefix herman was installed into: <prefix>/bin/herman → <prefix>."""
+    return THIS_FILE.parent.parent if THIS_FILE.parent.name == "bin" else Path.home() / ".local"
+
+
+def running_script_of(pid: int) -> str:
+    """The script a live process runs (from /proc), '' when it cannot be read."""
+    if not POSIX or pid <= 0:
+        return ""
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+        return ""
+    for item in raw:
+        name = item.decode("utf-8", "replace")
+        if name.endswith(PROG) or name.endswith(".py"):
+            return name
+    return ""
+
+
+def panel_service() -> dict:
+    """How the panel is supervised: the user unit, a detached pid file, or nothing at all."""
+    panels = list_panels()
+    state, main_pid = "", 0
+    if shutil.which("systemctl"):
+        res = run(["systemctl", "--user", "is-active", PANEL_UNIT], capture=True)
+        state = ((res.stdout or "") + (res.stderr or "")).strip().splitlines()
+        state = state[0].strip() if state else ""
+        shown = run(["systemctl", "--user", "show", "-p", "MainPID", "--value", PANEL_UNIT],
+                    capture=True)
+        try:
+            main_pid = int((shown.stdout or "0").strip() or 0)
+        except ValueError:
+            main_pid = 0
+    panel = panels[0] if panels else None
+    # The unit only gets restarted when it supervises THE PANEL BEING REPLACED: a second panel on
+    # another port (a test instance, a second install) must not pull the real service down with it.
+    supervises = bool(panel) and main_pid > 0 and int(panel.get("pid") or 0) == main_pid
+    return {"unit": PANEL_UNIT, "unit_state": state or "unknown", "unit_active": state == "active",
+            "unit_main_pid": main_pid, "unit_supervises": supervises,
+            "panels": panels, "panel": panel}
+
+
+def panel_summary(service: dict, panel: dict | None = None) -> dict:
+    """JSON-safe view of the panel: the pid/port/URL of the one that matters, never Path objects.
+
+    `list_panels()` hands out Paths for its pid files, and the panel answers this to the browser, so
+    the raw structure cannot be serialized as-is.
+    """
+    chosen = panel if panel is not None else (service.get("panel") or {})
+    return {"unit": service.get("unit", PANEL_UNIT), "unit_state": service.get("unit_state", ""),
+            "unit_active": bool(service.get("unit_active")),
+            "unit_supervises": bool(service.get("unit_supervises")),
+            "unit_main_pid": int(service.get("unit_main_pid") or 0),
+            "running": bool(chosen),
+            "pid": chosen.get("pid"), "port": chosen.get("port", DEFAULT_WEB_PORT),
+            "host": chosen.get("host", "127.0.0.1"),
+            "url": chosen.get("url") or f"http://127.0.0.1:{DEFAULT_WEB_PORT}/",
+            "script": running_script_of(int(chosen.get("pid") or 0))}
+
+
+def fetch_update_source(source: str | None = None) -> dict:
+    """Clone the source at depth 1 into the staging dir; the check and the update share it."""
+    src = (source or update_source()).strip()
+    out = {"ok": False, "source": src, "dir": str(UPDATE_STAGE), "version": "", "rev": "",
+           "error": ""}
+    if not shutil.which("git"):
+        out["error"] = "git is not installed: herman can only update itself from a git checkout"
+        return out
+    if not src:
+        out["error"] = "no update source configured"
+        return out
+    UPDATE_DIR.mkdir(parents=True, exist_ok=True)
+    if UPDATE_STAGE.exists():
+        shutil.rmtree(UPDATE_STAGE, ignore_errors=True)
+    res = run(["git", "clone", "--depth", "1", "--quiet", src, str(UPDATE_STAGE)], capture=True)
+    if res.returncode != 0 or not UPDATE_STAGE.exists():
+        lines = ((res.stderr or "") + (res.stdout or "")).strip().splitlines()
+        out["error"] = lines[-1] if lines else "git clone failed"
+        return out
+    out["version"] = version_in_file(UPDATE_STAGE / PROG)
+    rev = run(["git", "-C", str(UPDATE_STAGE), "rev-parse", "HEAD"], capture=True)
+    out["rev"] = (rev.stdout or "").strip()[:12]
+    if not out["version"]:
+        out["error"] = f"the clone carries no {PROG} script (is '{src}' the herman repo?)"
+        return out
+    out["ok"] = True
+    return out
+
+
+def update_check(source: str | None = None, *, refresh: bool = False,
+                 cached_only: bool = False) -> dict:
+    """Is a newer herman published? Reuses the cached verdict unless `refresh` (no surprise network)."""
+    src = (source or update_source()).strip()
+    cache_file = UPDATE_DIR / "check.json"
+    cached: dict = {}
+    try:
+        loaded = json.loads(cache_file.read_text(encoding="utf-8"))
+        cached = loaded if isinstance(loaded, dict) else {}
+    except (OSError, ValueError):
+        cached = {}
+    fresh = bool(cached) and (time.time() - float(cached.get("ts") or 0)) < UPDATE_CHECK_TTL \
+        and cached.get("source") == src and cached.get("installed") == VERSION
+    panel = panel_service()
+    info = {"ok": True, "error": "", "installed": VERSION, "prefix": str(install_prefix()),
+            "script": str(THIS_FILE), "page": str(html_path()), "source": src,
+            "latest": "", "rev": "", "checked_at": None, "cached": False,
+            "update_available": False, "sessions": live_sessions_all(),
+            "panel": panel_summary(panel), "ttl": UPDATE_CHECK_TTL}
+    if cached_only and not fresh:
+        return info
+    if fresh and not refresh:
+        info.update({"latest": cached.get("latest", ""), "rev": cached.get("rev", ""),
+                     "checked_at": cached.get("ts"), "cached": True,
+                     "update_available": bool(cached.get("update_available"))})
+        return info
+    fetched = fetch_update_source(src)
+    if not fetched["ok"]:
+        info.update({"ok": False, "error": fetched["error"]})
+        if cached.get("source") == src and cached.get("latest"):
+            info.update({"latest": cached["latest"], "rev": cached.get("rev", ""),
+                         "checked_at": cached.get("ts"), "cached": True,
+                         "update_available": bool(cached.get("update_available"))})
+        return info
+    info.update({"latest": fetched["version"], "rev": fetched["rev"], "checked_at": time.time(),
+                 "cached": False,
+                 "update_available": version_tuple(fetched["version"]) > version_tuple(VERSION)})
+    try:
+        cache_file.write_text(json.dumps(
+            {"ts": time.time(), "source": src, "installed": VERSION, "latest": fetched["version"],
+             "rev": fetched["rev"], "update_available": info["update_available"]}, indent=2),
+            encoding="utf-8")
+        chmod_quiet(cache_file)
+    except OSError:
+        pass
+    return info
+
+
+def write_update_helper() -> Path:
+    """(Re)generate the detached helper: it must match the CLI version that spawned it."""
+    UPDATE_DIR.mkdir(parents=True, exist_ok=True)
+    UPDATE_HELPER.write_text(_UPDATE_HELPER_SRC, encoding="utf-8")
+    try:
+        UPDATE_HELPER.chmod(0o700)
+    except OSError:
+        pass
+    return UPDATE_HELPER
+
+
+def publish_update_state(payload: dict) -> None:
+    """Publish one progress step (same file the helper writes)."""
+    try:
+        UPDATE_DIR.mkdir(parents=True, exist_ok=True)
+        UPDATE_STATE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        chmod_quiet(UPDATE_STATE)
+    except OSError:
+        pass
+
+
+def update_log() -> dict:
+    """Progress of the running (or last) self-update: exactly what the panel polls."""
+    out = {"state": "idle", "note": "", "ts": None, "version": "", "panel_version": "", "up": None,
+           "backup": "", "log": str(UPDATE_DIR / "install.log"), "error": "", "tail": []}
+    try:
+        data = json.loads(UPDATE_STATE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            out.update(data)
+    except (OSError, ValueError):
+        pass
+    try:
+        lines = (UPDATE_DIR / "install.log").read_text(encoding="utf-8",
+                                                       errors="replace").splitlines()
+        out["tail"] = [ln for ln in lines[-12:] if ln.strip()]
+    except OSError:
+        out["tail"] = []
+    return out
+
+
+def start_update(*, source: str | None = None, prefix: str | None = None, restart: bool = True,
+                 panel_port: int | None = None) -> dict:
+    """Clone the published copy and hand install+restart to the detached helper.
+
+    A live Hermes session is deliberately NOT a blocker: profiles are separate from herman, so a
+    running session neither blocks the update nor is touched by it - the session keeps running, and
+    the project cards still show it afterwards. Update and sessions are independent.
+    """
+    src = (source or update_source()).strip()
+    prefix_path = Path(prefix).expanduser() if prefix else install_prefix()
+    # An update writes herman's OWN files inside the install prefix and nothing else. Anything that
+    # points into the Hermes home is refused here, before a clone is even attempted: the projects,
+    # their sessions, memory, skills and settings are the operator's data, and no update - typed,
+    # clicked or scripted - may put them at risk.
+    if str(prefix_path) == str(ROOT) or str(prefix_path).startswith(str(ROOT) + os.sep):
+        return {"ok": False, "state": "error", "started": False,
+                "error": f"refusing to install into {ROOT}: an update only touches herman's own "
+                         f"files (the CLI, the page, the completion) outside the Hermes home"}
+    live = live_sessions_all()
+    fetched = fetch_update_source(src)
+    if not fetched["ok"]:
+        return {"ok": False, "state": "error", "started": False, "error": fetched["error"]}
+    target = fetched["version"]
+    if version_tuple(target) <= version_tuple(VERSION):
+        return {"ok": False, "state": "current", "started": False, "target": target,
+                "error": f"nothing to do: {src} publishes {target}, this herman is {VERSION}"}
+    service = panel_service()
+    panel = service.get("panel") or {}
+    if panel_port:
+        # Restart THE panel that asked, not merely the first one on this machine: with a second panel
+        # (another port, a test instance) the wrong one would go down and this tab would wait forever.
+        match = [x for x in service["panels"] if int(x.get("port") or 0) == int(panel_port)]
+        if match:
+            panel = match[0]
+    supervises = (bool(panel) and int(service.get("unit_main_pid") or 0) > 0
+                  and int(panel.get("pid") or 0) == int(service.get("unit_main_pid") or 0))
+    backup = UPDATE_DIR / f"backup-{VERSION}-{time.strftime('%Y%m%d-%H%M%S')}"
+    job = {"source": src, "stage": str(UPDATE_STAGE), "prefix": str(prefix_path), "target": target,
+           "was": VERSION, "backup": str(backup), "restart": bool(restart),
+           "unit": PANEL_UNIT if supervises else "",
+           "panel": {"pid": panel.get("pid"), "port": panel.get("port", DEFAULT_WEB_PORT),
+                     "host": panel.get("host", "127.0.0.1")},
+           "state": str(UPDATE_STATE), "log": str(UPDATE_DIR / "install.log"),
+           "token_file": str(TOKEN_FILE), "created": time.time(), "sessions": len(live),
+           "hermes_home": str(ROOT)}
+    UPDATE_DIR.mkdir(parents=True, exist_ok=True)
+    UPDATE_JOB.write_text(json.dumps(job, indent=2), encoding="utf-8")
+    write_update_helper()
+    publish_update_state({"state": "starting", "note": f"updating {VERSION} → {target}",
+                          "was": VERSION, "target": target, "ts": time.time(),
+                          "log": job["log"], "backup": str(backup), "prefix": str(prefix_path),
+                          "sessions": len(live), "restart": bool(restart)})
+    try:
+        with (UPDATE_DIR / "helper.log").open("ab") as sink:
+            proc = subprocess.Popen(
+                _scope_launcher() + [sys.executable, str(UPDATE_HELPER), str(UPDATE_JOB)],
+                stdout=sink, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                start_new_session=True)
+    except OSError as exc:
+        return {"ok": False, "state": "error", "started": False,
+                "error": f"could not start the update helper: {exc}"}
+    return {"ok": True, "state": "running", "started": True, "pid": proc.pid, "target": target,
+            "was": VERSION, "prefix": str(prefix_path), "backup": str(backup),
+            "sessions": len(live), "restart": bool(restart), "state_file": str(UPDATE_STATE),
+            "log": job["log"]}
+
+
+def mismatch_note(prefix_path: Path) -> str:
+    """Warn when the running CLI is not the copy an update would replace (dev checkout case).
+
+    `./install.sh` writes the prefix; a checkout that is run in place (or a unit that points at one)
+    keeps serving its own file, so installing the prefix is not enough there - say so instead of
+    reporting an update that the running panel will not show.
+    """
+    if str(THIS_FILE).startswith(str(prefix_path) + os.sep):
+        return ""
+    return (f"this {PROG} runs from {THIS_FILE}, outside {prefix_path}: an update writes the "
+            f"prefix, so update that checkout too (git pull) or the running panel keeps its copy")
+
+
+def do_update(*, check: bool = False, assume_yes: bool = False, dry: bool = False,
+              as_json: bool = False, source: str | None = None, prefix: str | None = None,
+              restart: bool = True) -> dict:
+    """CLI entry point for `herman update` (self-update; the panel button runs the same code)."""
+    src = (source or update_source()).strip()
+    if check:
+        res = update_check(src, refresh=True)
+        if as_json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+            return res
+        print(f"{bold(PROG + ' update')} · herman itself, from {src}")
+        print(f"  installed        {res['installed']}   ({res['script']})")
+        if res["ok"]:
+            print(f"  published        {res['latest']}   (rev {res['rev'] or 'unknown'})")
+        else:
+            print(f"  published        unknown   ({res['error']})")
+        live = res["sessions"]
+        print(f"  live sessions    {len(live)}   (left alone: herman does not touch a session)"
+              if live else "  live sessions    none")
+        if live:
+            print(dim(f"                   {', '.join(str(s.get('project')) for s in live[:6])}"))
+        print(dim(f"  panel            {res['panel']['unit']} {res['panel']['unit_state']}"
+                  + (f" · pid {res['panel']['pid']}" if res["panel"]["running"] else " · not running")))
+        note = mismatch_note(install_prefix())
+        if note:
+            print(dim(f"  note             {note}"))
+        if not res["ok"]:
+            print(f"  verdict          could not check: {res['error']}")
+        elif res["update_available"]:
+            print(f"  verdict          {res['latest']} is available · "
+                  f"`{PROG} update` installs it")
+        else:
+            print("  verdict          up to date: nothing to install")
+        return res
+    plan = update_check(src, refresh=True)
+    if not plan["ok"]:
+        if as_json:
+            print(json.dumps(plan, indent=2, ensure_ascii=False))
+            return plan
+        die(f"cannot reach the update source: {plan['error']}")
+    target = plan["latest"]
+    live = plan["sessions"]
+    prefix_path = Path(prefix).expanduser() if prefix else install_prefix()
+    if dry:
+        print(f"{bold(PROG + ' update --dry-run')} · nothing is written")
+        print(f"  source           {src}")
+        print(f"  installed        {VERSION}   ({plan['script']})")
+        print(f"  would install    {target}   (rev {plan['rev'] or 'unknown'}) into {prefix_path}")
+        print(f"  files            bin/{PROG}, share/{PROG}/index.html and the panel assets, "
+              f"completion")
+        print(f"  never touched    {ROOT} (projects, sessions, memory, skills, config)")
+        print(f"  live sessions    {len(live)}   (herman never touches a session; the cards keep showing them)"
+              if live else "  live sessions    none")
+        note = mismatch_note(prefix_path)
+        if note:
+            print(dim(f"  note             {note}"))
+        print(dim(f"  panel            {'restart ' + PANEL_UNIT if plan['panel']['unit_supervises'] else 'pid ' + str(plan['panel'].get('pid') or 'none')}"))
+        if as_json:
+            print(json.dumps({**plan, "prefix": str(prefix_path), "dry_run": True}, indent=2))
+        return {**plan, "dry_run": True, "prefix": str(prefix_path)}
+    if not plan["update_available"]:
+        if as_json:
+            print(json.dumps({**plan, "state": "current"}, indent=2, ensure_ascii=False))
+            return {**plan, "state": "current"}
+        print(f"{bold(PROG + ' update')} · {VERSION} is the newest: nothing to install")
+        return {**plan, "state": "current"}
+    if not assume_yes and not confirm(
+            f"Install herman {target} over {VERSION}?\n"
+            f"  files in {prefix_path} are replaced (the previous ones are backed up first);\n"
+            f"  {ROOT} is never touched, so no project or session data is lost."
+            + (f"\n  {len(live)} live Hermes session(s) keep running: herman does not stop them."
+               if live else ""),
+            phrase="update"):
+        print(dim("aborted: nothing was changed"))
+        return {**plan, "state": "aborted"}
+    res = start_update(source=src, prefix=str(prefix_path), restart=restart)
+    if as_json:
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+        return res
+    if not res.get("ok"):
+        die(res.get("error") or "the update could not start")
+    print(f"{bold(PROG + ' update')} · {res['was']} → {res['target']}")
+    print(f"  prefix           {res['prefix']}")
+    note = mismatch_note(Path(res["prefix"]))
+    if note:
+        print(dim(f"  note             {note}"))
+    print(f"  backup           {res['backup']}")
+    print(f"  progress         {res['state_file']}")
+    print(f"  log              {res['log']}")
+    if res["stopped"]:
+        print(f"  stopped          {len(res['stopped'])} session process(es)")
+    print(dim("  the panel reloads itself when the new version answers; from a terminal, watch the "
+              "progress file above"))
+    return res
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         require_hermes()
@@ -8547,6 +9543,28 @@ def main(argv: list[str]) -> int:
 
     if cmd in ("sync", "refresh"):
         do_sync(fix=("--fix" in rest), dry=dry or ("--dry" in rest), as_json=as_json)
+        return 0
+
+    if cmd in ("update", "upgrade", "self-update"):
+        do_update(check=("--check" in rest or (len(rest) > 1 and rest[1] == "check")),
+                  assume_yes=assume_yes, dry=dry or ("--dry-run" in rest) or ("--dry" in rest),
+                  as_json=as_json, source=val("--source"), prefix=val("--prefix"),
+                  restart=not ("--no-restart" in rest))
+        return 0
+
+    if cmd in ("last", "recent"):
+        args = rest[1:]
+        nm = next((a for a in args if not a.startswith("-") and a in list_profiles()), None)
+        try:
+            minutes = int(val("--within") or 0)
+        except (TypeError, ValueError):
+            minutes = 0
+        try:
+            lim = int(val("--limit") or 0) or (40 if "--all" in args else 5)
+        except (TypeError, ValueError):
+            lim = 40 if "--all" in args else 5
+        do_last(nm, everything=("--all" in args), within=(minutes * 60) or LAST_WINDOW_SECONDS,
+                limit=lim, as_json=as_json)
         return 0
 
     if cmd == "history":
